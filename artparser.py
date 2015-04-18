@@ -531,7 +531,7 @@ class ArtParser(object):
             # self.parse_unpacked()
 
     def parse_unpacked(data):
-        ...
+        pass
 
 
 # simple wrapper for calling this file from command line
