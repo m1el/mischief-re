@@ -626,7 +626,7 @@ def read_action(data, pos):
         (val['argument'], pos) = read_int(data, pos)
 
     elif val['action_id'] == 0x33:
-        val['action_name'] = 'view_matrix'
+        val['action_name'] = 'pen_matrix'
         (val['matrix'], pos) = read_float_matrix(data, pos, 4, 4)
         (val['zoom'], pos) = read_float(data, pos)
 
