@@ -465,15 +465,15 @@ def mischief_unpack(byte_input):
         ebx = state.sp_20
         # 00468A6F
         ecx = (decoded_length if state.out_pos < ebx else 0) - ebx
-        ebx = state.sp_30
+        copy_count = state.sp_30
         state.sp_14 += state.sp_30
         edi -= state.sp_30
-        ecx += state.out_pos
+        copy_source = ecx + state.out_pos
         state.sp_24 = edi
         # 00468A8C
-        for _ in xrange(ebx):
-            decoded[state.out_pos] = decoded[ecx % decoded_length]
-            ecx += 1
+        for _ in xrange(copy_count):
+            decoded[state.out_pos] = decoded[copy_source % decoded_length]
+            copy_source += 1
             state.out_pos += 1
     return decoded
 
