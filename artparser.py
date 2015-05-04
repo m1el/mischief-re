@@ -38,11 +38,9 @@ class UnpackerState():
         self.scale = 0
         self.value = 0 # ESI
         self.in_pos = 0 # sp_10
-        self.sp_14 = 0
         self.sp_18 = 0
         self.out_pos = 0 # sp_1c
         self.sp_20 = 0
-        self.sp_24 = 0
         self.sp_2c = 0
         self.sp_28 = 0
         self.sp_30 = 0
@@ -75,6 +73,7 @@ def mischief_unpack(byte_input):
     packed_length = len(byte_input)
     byte_input += bytearray([0,0,0,0])
     decoded_length = unpacked_size
+    bytes_produced = 0  # actually, bytes_produced should equal out_pos
     state.sp_20 = 1
     state.sp_28 = 1
     state.sp_2c = 1
@@ -90,8 +89,8 @@ def mischief_unpack(byte_input):
         _renormalize(state, byte_input)
         edi = state.sp_18
         ebp = 0 # state.garbage_p
-        ebx = ((state.sp_14 & 3) + (state.sp_18 << 4))*2
-        state.sp_30 = state.sp_14 & 3
+        ebx = ((bytes_produced & 3) + (state.sp_18 << 4))*2
+        state.sp_30 = bytes_produced & 3
         ecx = garbage[ebx//2]
         edx = ((state.scale >> 0x0b) * ecx) & MAXINT
         # 0046801D
@@ -101,10 +100,10 @@ def mischief_unpack(byte_input):
             ebp += 0xe6c
             garbage[ebx//2] = edx & 0xFFFF
             # 0046804A
-            if state.sp_44 or state.sp_14:
+            if state.sp_44 or bytes_produced:
                 ecx2 = state.out_pos or decoded_length
                 # 3 is sp_58
-                ebp += ((decoded[ecx2 - 1] >> (8 - 3)) + ((state.sp_14 & sp_50) << 3)) * 0x600
+                ebp += ((decoded[ecx2 - 1] >> (8 - 3)) + ((bytes_produced & sp_50) << 3)) * 0x600
                 state.sp_30 = ebp
             # 0046808F
             if state.sp_18 < 7:
@@ -163,7 +162,7 @@ def mischief_unpack(byte_input):
             # 004681B9
             decoded[state.out_pos] = ecx & 0xFF
             state.out_pos += 1
-            state.sp_14 += 1
+            bytes_produced += 1
             state.sp_18 = TABLE_50B8D8[state.sp_18]
             continue
         # 004681E1
@@ -189,7 +188,7 @@ def mischief_unpack(byte_input):
             ecx -= ecx >> 5
             garbage[(state.sp_18*2 + 0x180)//2] = ecx & 0xFFFF
             # 00468260
-            if not state.sp_44 and not state.sp_14:
+            if not state.sp_44 and not bytes_produced:
                 return -1
             edx = garbage[(state.sp_18*2 + 0x198)//2]
             # 00468278
@@ -215,7 +214,7 @@ def mischief_unpack(byte_input):
                     # 00468309
                     ebx = decoded_length if state.out_pos < edx else 0
                     ebx = ebx - edx + state.out_pos
-                    state.sp_14 += 1
+                    bytes_produced += 1
                     decoded[state.out_pos] = decoded[ebx]
                     state.out_pos += 1
                     # 00468322
@@ -335,7 +334,7 @@ def mischief_unpack(byte_input):
         # 0046857D
         ebp -= state.sp_30
         edi += ebp
-        state.sp_24 = edi
+        requested_copy_len = edi
         # 0046858A
         if state.sp_18 >= 0x0c:
             ecx = edi
@@ -434,7 +433,7 @@ def mischief_unpack(byte_input):
                             tmpvar3 += 1
                     # 004689F6
                     if ebp == -1:
-                        state.sp_24 += 0x112
+                        requested_copy_len += 0x112
                         state.sp_18 -= 0x0c
                         break
             # 004689FC
@@ -444,27 +443,24 @@ def mischief_unpack(byte_input):
             state.sp_20 = ebp + 1
             # 00468A2B
             if (state.sp_20 and 0 >= state.sp_20) \
-                    or 0 >= state.sp_14: # state.garbage_p
+                    or 0 >= bytes_produced: # state.garbage_p
                 return -3
             # 00468A31
             state.sp_18 = 0x7 if state.sp_18 < 0x13 else 0xa
-            edi = state.sp_24
 
-        # 00468A46
-        edi += 2
+        requested_copy_len += 2
         # 00468A51
         if decoded_length == state.out_pos:
             return -4
         # 00468A5B
-        copy_count = min(decoded_length - state.out_pos, edi)
+        copy_count = min(decoded_length - state.out_pos, requested_copy_len)
         # 00468A67
         ebx = state.sp_20
         # 00468A6F
         ecx = (decoded_length if state.out_pos < ebx else 0) - ebx
-        state.sp_14 += copy_count
-        edi -= copy_count
+        bytes_produced += copy_count
+        requested_copy_len -= copy_count
         copy_source = ecx + state.out_pos
-        state.sp_24 = edi
         # 00468A8C
         for _ in xrange(copy_count):
             decoded[state.out_pos] = decoded[copy_source % decoded_length]
