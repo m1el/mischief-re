@@ -212,7 +212,6 @@ def mischief_unpack(byte_input):
                 ecx = (state.scale >> 0xb) * edx
                 # 004682E3
                 if state.value < ecx:
-                    ebp = 0 # state.sp_34
                     state.scale = ecx
                     ecx = ((0x800 - edx) >> 5) + edx
                     edx = state.sp_20
@@ -478,9 +477,8 @@ def mischief_unpack(byte_input):
         edi = ecx + ebx
         # 00468A8C
         if edi <= edx:
-            edx = 0 # state.sp_34
             ecx -= ebp
-            edx += ebp
+            edx = ebp
             ebp += ebx
             edi = ecx
             ecx = edx + ebx
@@ -491,11 +489,10 @@ def mischief_unpack(byte_input):
                 edx += 1
         # 00468AAB
         else:
-            edi = 0 # state.sp_34
             # 00468AAD
             while ebx > 0:
-                edx = decoded[ecx+edi]
-                decoded[ebp+edi] = edx
+                edx = decoded[ecx]
+                decoded[ebp] = edx
                 ecx += 1
                 ebp += 1
                 # 00468ABD
