@@ -50,7 +50,6 @@ class UnpackerState():
         self.sp_40 = 0
         self.sp_44 = 0
         self.sp_4c = 0
-        self.sp_64 = 0
     def __str__(self):
         attrs = ['scale', 'value', 'out_pos', 'in_pos']
         return '\n'.join(['{0}: {1}'.format(i, hex(getattr(self, i)))
@@ -80,7 +79,6 @@ def mischief_unpack(byte_input):
     state.sp_28 = 1
     state.sp_2c = 1
     state.sp_40 = 1
-    state.sp_64 = decoded_length
     sp_50 = 0
 
     decoded = bytearray(decoded_length)
@@ -453,14 +451,12 @@ def mischief_unpack(byte_input):
             edi = state.sp_24
 
         # 00468A46
-        ecx = state.sp_64
         edi += 2
         # 00468A51
-        if state.sp_64 == state.out_pos:
+        if decoded_length == state.out_pos:
             return -4
-        ecx -= state.out_pos
         # 00468A5B
-        state.sp_30 = min(ecx, edi)
+        state.sp_30 = min(decoded_length - state.out_pos, edi)
         # 00468A67
         ebx = state.sp_20
         # 00468A6F
