@@ -476,13 +476,11 @@ def mischief_unpack(byte_input):
         edi = ecx + ebx
         # 00468A8C
         if edi <= edx:
-            cur_pos = state.out_pos
-            end_pos = cur_pos + ebx
-            while cur_pos < end_pos:
-                decoded[cur_pos] = decoded[ecx]
+            end_pos = state.out_pos + ebx
+            while state.out_pos < end_pos:
+                decoded[state.out_pos] = decoded[ecx]
                 ecx += 1
-                cur_pos += 1
-            state.out_pos += ebx
+                state.out_pos += 1
         # 00468AAB
         else:
             # 00468AAD
