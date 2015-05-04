@@ -35,8 +35,8 @@ MAXINT = 0xFFFFFFFF
 
 class UnpackerState():
     def __init__(self):
-        self.EAX = 0
-        self.ESI = 0 # ESI
+        self.scale = 0
+        self.value = 0 # ESI
         self.in_pos = 0 # sp_10
         self.sp_14 = 0
         self.sp_18 = 0
@@ -53,15 +53,15 @@ class UnpackerState():
         self.sp_4c = 0
         self.sp_64 = 0
     def __str__(self):
-        attrs = ['EAX', 'ESI', 'out_pos', 'in_pos']
+        attrs = ['scale', 'value', 'out_pos', 'in_pos']
         return '\n'.join(['{0}: {1}'.format(i, hex(getattr(self, i)))
             for i in attrs])
 
 
-def _pop_byte(state, byte_input):
-    if state.EAX < 0x01000000:
-        state.EAX = ((state.EAX << 8) & MAXINT)
-        state.ESI = ((state.ESI << 8) & MAXINT) | byte_input[state.in_pos]
+def _renormalize(state, byte_input):
+    if state.scale < 0x01000000:
+        state.scale = ((state.scale << 8) & MAXINT)
+        state.value = ((state.value << 8) & MAXINT) | byte_input[state.in_pos]
         state.in_pos = state.in_pos + 1
 
 
@@ -70,9 +70,9 @@ def mischief_unpack(byte_input):
     this function unpacks bytes and returns an unpacked byte array
     '''
     state = UnpackerState()
-    state.EAX = 0xFFFFFFFF
+    state.scale = 0xFFFFFFFF
     (unpacked_size,) = struct.unpack('I', byte_input[0:4])
-    (state.ESI,) = struct.unpack('>I', byte_input[5:9])
+    (state.value,) = struct.unpack('>I', byte_input[5:9])
     state.in_pos = 9
     packed_length = len(byte_input)
     byte_input += bytearray([0,0,0,0])
@@ -91,16 +91,16 @@ def mischief_unpack(byte_input):
 
     # 00467FE1
     while state.in_pos < packed_length and state.out_pos < decoded_length:
-        _pop_byte(state, byte_input)
+        _renormalize(state, byte_input)
         edi = state.sp_18
         ebp = 0 # state.garbage_p
         ebx = ((state.sp_14 & 3) + (state.sp_18 << 4))*2
         state.sp_30 = state.sp_14 & 3
         ecx = garbage[ebx//2]
-        edx = ((state.EAX >> 0x0b) * ecx) & MAXINT
+        edx = ((state.scale >> 0x0b) * ecx) & MAXINT
         # 0046801D
-        if state.ESI < edx:
-            state.EAX = edx
+        if state.value < edx:
+            state.scale = edx
             edx = ((0x800 - ecx) >> 5) + ecx
             ebp += 0xe6c
             garbage[ebx//2] = edx & 0xFFFF
@@ -116,18 +116,18 @@ def mischief_unpack(byte_input):
                 # 0046809F
                 while ecx < 0x100:
                     edx = garbage[(ebp//2)+ecx]
-                    _pop_byte(state, byte_input)
-                    edi = (state.EAX >> 0xb) * edx
+                    _renormalize(state, byte_input)
+                    edi = (state.scale >> 0xb) * edx
                     # 004680C2
-                    if state.ESI < edi:
-                        state.EAX = edi
+                    if state.value < edi:
+                        state.scale = edi
                         edi = ((0x800 - edx) >> 5) + edx
                         garbage[(ebp//2)+ecx] = edi & 0xFFFF
                         ecx = ecx * 2
                     # 004680D9
                     else:
-                        state.EAX = state.EAX - edi
-                        state.ESI = state.ESI - edi
+                        state.scale = state.scale - edi
+                        state.value = state.value - edi
                         edx -= edx >> 5
                         garbage[(ebp//2)+ecx] = edx & 0xFFFF
                         ecx = ecx * 2 + 1
@@ -147,19 +147,19 @@ def mischief_unpack(byte_input):
                     state.sp_4c = state.sp_30 + (edx + ebx + ecx)*2
                     edi = garbage[state.sp_4c//2]
                     # 0046814F
-                    _pop_byte(state, byte_input)
-                    ebp = (state.EAX >> 0xb) * edi
+                    _renormalize(state, byte_input)
+                    ebp = (state.scale >> 0xb) * edi
                     # 00468177
-                    if state.ESI < ebp:
-                        state.EAX = ebp
+                    if state.value < ebp:
+                        state.scale = ebp
                         ebp = ((0x800 - edi) >> 5) + edi
                         garbage[state.sp_4c//2] = ebp & 0xFFFF
                         ecx = ecx * 2
                         edx = ~edx
                     # 00468192
                     else:
-                        state.EAX -= ebp
-                        state.ESI -= ebp
+                        state.scale -= ebp
+                        state.value -= ebp
                         edi = edi - (edi >> 5)
                         garbage[state.sp_4c//2] = edi & 0xFFFF
                         ecx = ecx * 2 + 1
@@ -171,25 +171,25 @@ def mischief_unpack(byte_input):
             state.sp_18 = TABLE_50B8D8[state.sp_18]
             continue
         # 004681E1
-        state.EAX -= edx
-        state.ESI -= edx
+        state.scale -= edx
+        state.value -= edx
         ecx -= ecx >> 5
         garbage[ebx//2] = ecx & 0xFFFF
         ecx = garbage[(state.sp_18*2 + 0x180)//2]
         # 00468200
-        _pop_byte(state, byte_input)
-        edx = ((state.EAX >> 0x0b) * ecx) & MAXINT
+        _renormalize(state, byte_input)
+        edx = ((state.scale >> 0x0b) * ecx) & MAXINT
         # 0046821C
-        if state.ESI < edx:
-            state.EAX = edx
+        if state.value < edx:
+            state.scale = edx
             edx = ((0x800 - ecx) >> 5) + ecx;
             garbage[(state.sp_18*2 + 0x180)//2] = edx & 0xFFFF
             state.sp_18 += 0x0c
             ecx = 0x664
         # 00468241
         else:
-            state.EAX -= edx
-            state.ESI -= edx
+            state.scale -= edx
+            state.value -= edx
             ecx -= ecx >> 5
             garbage[(state.sp_18*2 + 0x180)//2] = ecx & 0xFFFF
             # 00468260
@@ -197,23 +197,23 @@ def mischief_unpack(byte_input):
                 return -1
             edx = garbage[(state.sp_18*2 + 0x198)//2]
             # 00468278
-            _pop_byte(state, byte_input)
-            ecx = (state.EAX >> 0xb) * edx
+            _renormalize(state, byte_input)
+            ecx = (state.scale >> 0xb) * edx
             # 00468294
-            if state.ESI < ecx:
+            if state.value < ecx:
                 ebx = ((0x800 - edx) >> 5) + edx
                 edx = ((state.sp_18 + 0xf) << 4) + state.sp_30
                 garbage[(state.sp_18*2 + 0x198)//2] = ebx & 0xFFFF
                 ebx = edx*2
                 edx = garbage[ebx//2]
-                state.EAX = ecx
+                state.scale = ecx
                 # 004682BF
-                _pop_byte(state, byte_input)
-                ecx = (state.EAX >> 0xb) * edx
+                _renormalize(state, byte_input)
+                ecx = (state.scale >> 0xb) * edx
                 # 004682E3
-                if state.ESI < ecx:
+                if state.value < ecx:
                     ebp = 0 # state.sp_34
-                    state.EAX = ecx
+                    state.scale = ecx
                     ecx = ((0x800 - edx) >> 5) + edx
                     edx = state.sp_20
                     garbage[ebx//2] = ecx & 0xFFFF
@@ -226,46 +226,46 @@ def mischief_unpack(byte_input):
                     # 00468322
                     state.sp_18 = 0x9 if state.sp_18 < 7 else 0xB
                     continue
-                state.EAX -= ecx
-                state.ESI -= ecx
+                state.scale -= ecx
+                state.value -= ecx
                 edx -= edx >> 5
                 garbage[ebx//2] = edx & 0xFFFF
             # 00468348
             else:
-                state.EAX -= ecx
-                state.ESI -= ecx
+                state.scale -= ecx
+                state.value -= ecx
                 edx -= (edx >> 5)
                 garbage[(state.sp_18*2+0x198)//2] = edx & 0xFFFF
                 ecx = garbage[(state.sp_18*2+0x1B0)//2]
                 # 0046836D
-                _pop_byte(state, byte_input)
-                edx = (state.EAX >> 0xb) * ecx
+                _renormalize(state, byte_input)
+                edx = (state.scale >> 0xb) * ecx
                 # 00468389
-                if state.ESI < edx:
-                    state.EAX = edx
+                if state.value < edx:
+                    state.scale = edx
                     edx = ((0x800 - ecx) >> 5) + ecx
                     ecx = state.sp_28
                     garbage[(state.sp_18*2+0x1B0)//2] = edx & 0xFFFF
                 # 004683A5
                 else:
-                    state.EAX -= edx
-                    state.ESI -= edx
+                    state.scale -= edx
+                    state.value -= edx
                     ecx = ecx - (ecx >> 5)
                     garbage[(state.sp_18*2+0x1B0)//2] = ecx & 0xFFFF
                     ecx = garbage[(state.sp_18*2+0x1C8)//2]
                     # 004683CA
-                    _pop_byte(state, byte_input)
-                    edx = (state.EAX >> 0xb) * ecx
+                    _renormalize(state, byte_input)
+                    edx = (state.scale >> 0xb) * ecx
                     # 004683E1
-                    if state.ESI < edx:
-                        state.EAX = edx
+                    if state.value < edx:
+                        state.scale = edx
                         edx = ((0x800 - ecx) >> 5) + ecx
                         ecx = state.sp_2c
                         garbage[(state.sp_18*2+0x1C8)//2] = edx & 0xFFFF
                     # 00468402
                     else:
-                        state.EAX -= edx
-                        state.ESI -= edx
+                        state.scale -= edx
+                        state.value -= edx
                         ecx -= ecx >> 5
                         garbage[(state.sp_18*2+0x1C8)//2] = ecx & 0xFFFF
                         ecx = state.sp_40
@@ -278,12 +278,12 @@ def mischief_unpack(byte_input):
             ecx = 0xA68
         edx = garbage[ecx//2]
         # 0046844f
-        _pop_byte(state, byte_input)
-        edi = (state.EAX >> 0xb) * edx
+        _renormalize(state, byte_input)
+        edi = (state.scale >> 0xb) * edx
         # 0046846B
-        if state.ESI < edi:
+        if state.value < edi:
             ebx = state.sp_30 * 2
-            state.EAX = edi
+            state.scale = edi
             edi = ((0x800 - edx) >> 5) + edx
             garbage[ecx//2] = edi & 0xFFFF
             ebx = ecx + state.sp_30 * 2 * 8 + 4
@@ -291,18 +291,18 @@ def mischief_unpack(byte_input):
             state.sp_30 = 8
         # 00468497
         else:
-            state.EAX -= edi
-            state.ESI -= edi
+            state.scale -= edi
+            state.value -= edi
             edx -= edx >> 5
             garbage[ecx//2] = edx & 0xFFFF
             edx = garbage[(ecx + 2)//2]
             # 004684B3
-            _pop_byte(state, byte_input)
-            edi = (state.EAX >> 0xb) * edx
+            _renormalize(state, byte_input)
+            edi = (state.scale >> 0xb) * edx
             # 004684CF
-            if state.ESI < edi:
+            if state.value < edi:
                 ebx = state.sp_30
-                state.EAX = edi
+                state.scale = edi
                 edi = ((0x800 - edx) >> 5) + edx
                 garbage[(ecx+2)//2] = edi & 0xFFFF
                 ebx = ecx + ebx * 2 * 8 + 0x104
@@ -310,8 +310,8 @@ def mischief_unpack(byte_input):
                 state.sp_30 = 8
             # 004684F9
             else:
-                state.EAX -= edi
-                state.ESI -= edi
+                state.scale -= edi
+                state.value -= edi
                 edx = edx - (edx >> 5)
                 garbage[(ecx+2)//2] = edx & 0xFFFF
                 ebx = ecx+0x204
@@ -322,18 +322,18 @@ def mischief_unpack(byte_input):
         while edi < state.sp_30:
             ecx = garbage[(ebx+edi*2)//2]
             # 00468522
-            _pop_byte(state, byte_input)
-            edx = (state.EAX >> 0xb) * ecx
+            _renormalize(state, byte_input)
+            edx = (state.scale >> 0xb) * ecx
             # 0046854A
-            if state.ESI < edx:
-                state.EAX = edx
+            if state.value < edx:
+                state.scale = edx
                 edx = ((0x800 - ecx) >> 5) + ecx
                 garbage[(ebx+edi*2)//2] = edx & 0xFFFF
                 edi += edi
             # 00468560
             else:
-                state.EAX -= edx
-                state.ESI -= edx
+                state.scale -= edx
+                state.value -= edx
                 ecx = ecx - (ecx >> 5)
                 garbage[(ebx+edi*2)//2] = ecx & 0xFFFF
                 edi += edi + 1
@@ -354,15 +354,15 @@ def mischief_unpack(byte_input):
             while tmpvar2 < 0x40:
                 tmpvar2 = tmpvar2 * 2
                 edx = garbage[(ecx + tmpvar2)//2]
-                _pop_byte(state, byte_input)
-                edi = (state.EAX >> 0xb) * edx
-                if state.ESI < edi:
-                    state.EAX = edi
+                _renormalize(state, byte_input)
+                edi = (state.scale >> 0xb) * edx
+                if state.value < edi:
+                    state.scale = edi
                     edi = ((0x800 - edx) >> 5) + edx
                     garbage[(tmpvar2+ecx)//2] = edi & 0xFFFF
                 else:
-                    state.EAX -= edi
-                    state.ESI -= edi
+                    state.scale -= edi
+                    state.value -= edi
                     edx -= edx >> 5
                     garbage[(tmpvar2+ecx)//2] = edx & 0xFFFF
                     tmpvar2 += 1
@@ -386,18 +386,18 @@ def mischief_unpack(byte_input):
                     while state.sp_30:
                         edx = garbage[(ebx+edi*2)//2]
                         # 004687D9
-                        _pop_byte(state, byte_input)
-                        ecx = (state.EAX >> 0xb) * edx
+                        _renormalize(state, byte_input)
+                        ecx = (state.scale >> 0xb) * edx
                         # 004687F8
-                        if state.ESI < ecx:
-                            state.EAX = ecx
+                        if state.value < ecx:
+                            state.scale = ecx
                             ecx = ((0x800 - edx) >> 5) + edx
                             garbage[(ebx+edi*2)//2] = ecx & 0xFFFF
                             edi += edi
                         # 0046880E
                         else:
-                            state.EAX -= ecx
-                            state.ESI -= ecx
+                            state.scale -= ecx
+                            state.value -= ecx
                             edx -= edx >> 5
                             ebp = ebp | state.sp_40
                             garbage[(ebx+edi*2)//2] = edx & 0xFFFF
@@ -410,13 +410,13 @@ def mischief_unpack(byte_input):
                     state.sp_30 = ecx
                     # 00468846
                     while state.sp_30:
-                        _pop_byte(state, byte_input)
+                        _renormalize(state, byte_input)
                         # 00468854
-                        state.EAX = state.EAX >> 1
-                        state.ESI = (state.ESI - state.EAX) & MAXINT
-                        edx = -(state.ESI >> 0x1F)
+                        state.scale = state.scale >> 1
+                        state.value = (state.value - state.scale) & MAXINT
+                        edx = -(state.value >> 0x1F)
                         ebp = edx + ebp*2 + 1
-                        state.ESI = (state.ESI + (edx & state.EAX)) & MAXINT
+                        state.value = (state.value + (edx & state.scale)) & MAXINT
                         state.sp_30 -= 1
                     # 0046886D-004689F6 (unwound loop)
                     ebp = ebp << 4
@@ -424,15 +424,15 @@ def mischief_unpack(byte_input):
                     for tmpvar4 in range(4):
                         tmpvar3 = tmpvar3 * 2
                         edx = garbage[(0x644 + tmpvar3)//2]
-                        _pop_byte(state, byte_input)
-                        edi = (state.EAX >> 0xb) * edx
-                        if state.ESI < edi:
-                            state.EAX = edi
+                        _renormalize(state, byte_input)
+                        edi = (state.scale >> 0xb) * edx
+                        if state.value < edi:
+                            state.scale = edi
                             edi = ((0x800 - edx) >> 5) + edx
                             garbage[(0x644 + tmpvar3)//2] = edi & 0xFFFF
                         else:
-                            state.EAX -= edi
-                            state.ESI -= edi
+                            state.scale -= edi
+                            state.value -= edi
                             edx -= edx >> 5
                             garbage[(0x644 + tmpvar3)//2] = edx & 0xFFFF
                             ebp = ebp | (1 << tmpvar4)
