@@ -463,9 +463,8 @@ def mischief_unpack(byte_input):
         state.sp_30 = min(ecx, edi)
         # 00468A67
         ebx = state.sp_20
-        edx = decoded_length
         # 00468A6F
-        ecx = (edx if state.out_pos < ebx else 0) - ebx
+        ecx = (decoded_length if state.out_pos < ebx else 0) - ebx
         ebx = state.sp_30
         state.sp_14 += state.sp_30
         edi -= state.sp_30
@@ -473,7 +472,7 @@ def mischief_unpack(byte_input):
         state.sp_24 = edi
         edi = ecx + ebx
         # 00468A8C
-        if edi <= edx:
+        if edi <= decoded_length:
             for _ in xrange(ebx):
                 decoded[state.out_pos] = decoded[ecx]
                 ecx += 1
