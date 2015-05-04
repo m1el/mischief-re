@@ -456,7 +456,7 @@ def mischief_unpack(byte_input):
 
         # 00468A46
         ecx = state.sp_64
-        ebp = state.out_pos
+        state.out_pos = state.out_pos  # priming of cache
         edi += 2
         # 00468A51
         if state.sp_64 == state.out_pos:
@@ -468,21 +468,21 @@ def mischief_unpack(byte_input):
         ebx = state.sp_20
         edx = state.sp_38
         # 00468A6F
-        ecx = (edx if ebp < ebx else 0) - ebx
+        ecx = (edx if state.out_pos < ebx else 0) - ebx
         ebx = state.sp_30
         state.sp_14 += state.sp_30
         edi -= state.sp_30
-        ecx += ebp
+        ecx += state.out_pos
         state.sp_24 = edi
         edi = ecx + ebx
         # 00468A8C
         if edi <= edx:
-            ecx -= ebp
-            edx = ebp
-            ebp += ebx
+            ecx -= state.out_pos
+            edx = state.out_pos
+            state.out_pos += ebx
             edi = ecx
             ecx = edx + ebx
-            state.out_pos = ebp
+            state.out_pos = state.out_pos  # write-back of cache
             while edx < ecx:
                 ebx = decoded[edi+edx]
                 decoded[edx] = ebx
@@ -492,15 +492,15 @@ def mischief_unpack(byte_input):
             # 00468AAD
             while ebx > 0:
                 edx = decoded[ecx]
-                decoded[ebp] = edx
+                decoded[state.out_pos] = edx
                 ecx += 1
-                ebp += 1
+                state.out_pos += 1
                 # 00468ABD
                 if ecx == state.sp_38:
                     ecx = 0
                 ebx -= 1
             # 00468AC4
-            state.out_pos = ebp
+            state.out_pos = state.out_pos  # write-back of cache
     return decoded
 
 
