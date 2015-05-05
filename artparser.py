@@ -40,7 +40,6 @@ class UnpackerState():
         self.in_pos = 0 # sp_10
         self.sp_18 = 0
         self.out_pos = 0 # sp_1c
-        self.sp_20 = 0
         self.sp_2c = 0
         self.sp_28 = 0
         self.sp_30 = 0
@@ -74,7 +73,7 @@ def mischief_unpack(byte_input):
     byte_input += bytearray([0,0,0,0])
     decoded_length = unpacked_size
     bytes_produced = 0  # actually, bytes_produced should equal out_pos
-    state.sp_20 = 1
+    distance = 1
     state.sp_28 = 1
     state.sp_2c = 1
     state.sp_40 = 1
@@ -128,8 +127,8 @@ def mischief_unpack(byte_input):
                         ecx = ecx * 2 + 1
             # 004680FB
             else:
-                edi = decoded_length if state.out_pos < state.sp_20 else 0
-                edi -= state.sp_20
+                edi = decoded_length if state.out_pos < distance else 0
+                edi -= distance
                 ebx = 0x100
                 edi = decoded[edi + state.out_pos]
                 ecx = 1
@@ -209,7 +208,7 @@ def mischief_unpack(byte_input):
                 if state.value < ecx:
                     state.scale = ecx
                     ecx = ((0x800 - edx) >> 5) + edx
-                    edx = state.sp_20
+                    edx = distance
                     garbage[ebx//2] = ecx & 0xFFFF
                     # 00468309
                     ebx = decoded_length if state.out_pos < edx else 0
@@ -265,8 +264,8 @@ def mischief_unpack(byte_input):
                         ecx = state.sp_40
                         state.sp_40 = state.sp_2c
                     state.sp_2c = state.sp_28
-                state.sp_28 = state.sp_20
-                state.sp_20 = ecx
+                state.sp_28 = distance
+                distance = ecx
             # 00468437
             state.sp_18 = 8 if state.sp_18 < 7 else 0xb
             ecx = 0xA68
@@ -438,11 +437,11 @@ def mischief_unpack(byte_input):
                         break
             # 004689FC
             state.sp_40 = state.sp_2c
-            (state.sp_28, state.sp_2c) = (state.sp_20, state.sp_28)
-            ecx = state.sp_20
-            state.sp_20 = ebp + 1
+            (state.sp_28, state.sp_2c) = (distance, state.sp_28)
+            ecx = distance
+            distance = ebp + 1
             # 00468A2B
-            if (state.sp_20 and 0 >= state.sp_20) \
+            if (distance and 0 >= distance) \
                     or 0 >= bytes_produced: # state.garbage_p
                 return -3
             # 00468A31
@@ -455,12 +454,9 @@ def mischief_unpack(byte_input):
         # 00468A5B
         copy_count = min(decoded_length - state.out_pos, requested_copy_len)
         # 00468A67
-        ebx = state.sp_20
-        # 00468A6F
-        ecx = (decoded_length if state.out_pos < ebx else 0) - ebx
         bytes_produced += copy_count
         requested_copy_len -= copy_count
-        copy_source = ecx + state.out_pos
+        copy_source = (state.out_pos - distance) % decoded_length
         # 00468A8C
         for _ in xrange(copy_count):
             decoded[state.out_pos] = decoded[copy_source % decoded_length]
