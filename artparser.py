@@ -456,11 +456,9 @@ def mischief_unpack(byte_input):
         # 00468A67
         bytes_produced += copy_count
         requested_copy_len -= copy_count
-        copy_source = (state.out_pos - distance) % decoded_length
         # 00468A8C
         for _ in xrange(copy_count):
-            decoded[state.out_pos] = decoded[copy_source % decoded_length]
-            copy_source += 1
+            decoded[state.out_pos] = decoded[(state.out_pos - distance) % decoded_length]
             state.out_pos += 1
     return decoded
 
