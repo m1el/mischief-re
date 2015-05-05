@@ -57,6 +57,20 @@ class UnpackerState():
             self.scale = ((self.scale << 8) & MAXINT)
             self.value = ((self.value << 8) & MAXINT) | self.input[self.in_pos]
             self.in_pos += 1
+    def get_bit(self, contextidx):
+        self.renormalize()
+        threshold = self.thresholds[contextidx]
+        scaled_threshold = ((self.scale >> 0x0b) * threshold) & MAXINT
+        if self.value < scaled_threshold:
+            self.thresholds[contextidx] = (threshold - ((threshold+0x1f) >> 5)) + 1*0x40
+            self.scale = scaled_threshold
+            return 0
+        else:
+            self.thresholds[contextidx] = (threshold - ( threshold       >> 5)) + 0*0x40
+            self.value -= scaled_threshold
+            self.scale -= scaled_threshold
+            return 1
+
     def __str__(self):
         attrs = ['scale', 'value', 'out_pos', 'in_pos']
         return '\n'.join(['{0}: {1}'.format(i, hex(getattr(self, i)))
@@ -73,19 +87,13 @@ def mischief_unpack(byte_input):
 
     # 00467FE1
     while state.in_pos < state.in_length and state.out_pos < state.out_length:
-        state.renormalize()
         edi = state.sp_18
         ebp = 0
         ebx = ((state.out_pos & 3) + (state.sp_18 << 4))*2
         state.sp_30 = state.out_pos & 3
-        ecx = state.thresholds[ebx//2]
-        edx = ((state.scale >> 0x0b) * ecx) & MAXINT
         # 0046801D
-        if state.value < edx:
-            state.scale = edx
-            edx = ((0x800 - ecx) >> 5) + ecx
+        if state.get_bit(ebx//2) == 0:
             ebp += 0xe6c
-            state.thresholds[ebx//2] = edx & 0xFFFF
             # 0046804A
             if state.sp_44 or state.out_pos:
                 ecx2 = state.out_pos or state.out_length
@@ -152,10 +160,6 @@ def mischief_unpack(byte_input):
             state.sp_18 = TABLE_50B8D8[state.sp_18]
             continue
         # 004681E1
-        state.scale -= edx
-        state.value -= edx
-        ecx -= ecx >> 5
-        state.thresholds[ebx//2] = ecx & 0xFFFF
         ecx = state.thresholds[(state.sp_18*2 + 0x180)//2]
         # 00468200
         state.renormalize()
