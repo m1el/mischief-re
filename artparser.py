@@ -42,7 +42,6 @@ class UnpackerState():
         self.sp_30 = 0
         # self.garbage_p = 0 # sp_3c
         self.sp_40 = 1
-        self.sp_44 = 0
         self.sp_4c = 0
         (self.out_length,) = struct.unpack('I', byte_input[0:4])
         self.scale = 0xFFFFFFFF
@@ -104,7 +103,7 @@ def mischief_unpack(byte_input):
         if state.get_bit(ebx//2) == 0:
             ebp += 0xe6c
             # 0046804A
-            if state.sp_44 or state.out_pos:
+            if state.out_pos:
                 ecx2 = state.out_pos or state.out_length
                 # 3 is sp_58
                 ebp += ((state.decoded[ecx2 - 1] >> (8 - 3)) + ((state.out_pos & sp_50) << 3)) * 0x600
@@ -154,7 +153,7 @@ def mischief_unpack(byte_input):
         # 00468241
         else:
             # 00468260
-            if not state.sp_44 and not state.out_pos:
+            if not state.out_pos:
                 return -1
             # 00468294
             if state.get_bit((state.sp_18*2 + 0x198)//2) == 0:
