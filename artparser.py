@@ -143,8 +143,11 @@ def mischief_unpack(byte_input):
             state.sp_18 = TABLE_50B8D8[state.sp_18]
             continue
         # 0046821C
+        # ecx is dead here: The next access to ecx is
+        # always a store
         if state.get_bit(state.sp_18 + 0xC0) == 0:
             state.sp_18 += 0x0c
+            # ecx is dead here (begin A of region I am going to change)
             ecx = 0x664
         # 00468241
         else:
@@ -183,6 +186,7 @@ def mischief_unpack(byte_input):
                 state.sp_28 = distance
                 distance = ecx
             # 00468437
+            # ecx is dead here (begin B of region I am going to change)
             state.sp_18 = 8 if state.sp_18 < 7 else 0xb
             ecx = 0xA68
         # 0046846B
@@ -204,6 +208,7 @@ def mischief_unpack(byte_input):
                 ebx = ecx+0x204
                 ebp = 0x10
                 state.sp_30 = 0x100
+        # ecx is dead here (end of region I am going to change)
         # 0046851D
         edi = 1
         while edi < state.sp_30:
