@@ -185,6 +185,7 @@ def mischief_unpack(byte_input):
             # 00468437
             state.sp_18 = 8 if state.sp_18 < 7 else 0xb
             ecx = 0x534
+        # ebx is dead here (begin of region to change)
         # 0046846B
         if state.get_bit(ecx) == 0:
             ebx = state.sp_30 * 2
@@ -213,6 +214,7 @@ def mischief_unpack(byte_input):
             # 00468560
             else:
                 edi += edi + 1
+        # ebx is dead here (end of region to change)
         # 0046857D
         ebp -= state.sp_30
         edi += ebp
