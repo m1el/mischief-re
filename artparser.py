@@ -93,12 +93,11 @@ def mischief_unpack(byte_input):
     # 00467FE1
     while state.in_pos < state.in_length and state.out_pos < state.out_length:
         edi = state.sp_18
-        ebp = 0
         ebx = ((state.out_pos & 3) + (state.sp_18 << 4))
         state.sp_30 = state.out_pos & 3
         # 0046801D
         if state.get_bit(ebx) == 0:
-            ebp += 0xe6c
+            ebp = 0xe6c
             # 0046804A
             if state.out_pos != 0:
                 # 3 is sp_58
