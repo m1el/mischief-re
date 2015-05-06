@@ -70,6 +70,15 @@ class UnpackerState():
             self.value -= scaled_threshold
             self.scale -= scaled_threshold
             return 1
+    def get_raw_bit(self):
+        self.renormalize()
+        self.scale >>= 1
+        if self.value < self.scale:
+            return 0
+        else:
+            self.value -= self.scale
+            return 1
+
 
     def __str__(self):
         attrs = ['scale', 'value', 'out_pos', 'in_pos']
@@ -263,13 +272,7 @@ def mischief_unpack(byte_input):
                     state.sp_30 = ecx
                     # 00468846
                     while state.sp_30:
-                        state.renormalize()
-                        # 00468854
-                        state.scale = state.scale >> 1
-                        state.value = (state.value - state.scale) & MAXINT
-                        edx = -(state.value >> 0x1F)
-                        ebp = edx + ebp*2 + 1
-                        state.value = (state.value + (edx & state.scale)) & MAXINT
+                        ebp = state.get_raw_bit() + (ebp * 2)
                         state.sp_30 -= 1
                     # 0046886D-004689F6 (unwound loop)
                     ebp = ebp << 4
