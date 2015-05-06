@@ -105,21 +105,11 @@ def mischief_unpack(byte_input):
                 ecx = 1
                 # 0046809F
                 while ecx < 0x100:
-                    edx = state.thresholds[(ebp//2)+ecx]
-                    state.renormalize()
-                    edi = (state.scale >> 0xb) * edx
                     # 004680C2
-                    if state.value < edi:
-                        state.scale = edi
-                        edi = ((0x800 - edx) >> 5) + edx
-                        state.thresholds[(ebp//2)+ecx] = edi & 0xFFFF
+                    if state.get_bit((ebp//2)+ecx) == 0:
                         ecx = ecx * 2
                     # 004680D9
                     else:
-                        state.scale = state.scale - edi
-                        state.value = state.value - edi
-                        edx -= edx >> 5
-                        state.thresholds[(ebp//2)+ecx] = edx & 0xFFFF
                         ecx = ecx * 2 + 1
             # 004680FB
             else:
@@ -135,23 +125,12 @@ def mischief_unpack(byte_input):
                     tmpvar1 = edi
                     edx = ebx & edi
                     state.sp_4c = state.sp_30 + (edx + ebx + ecx)*2
-                    edi = state.thresholds[state.sp_4c//2]
-                    # 0046814F
-                    state.renormalize()
-                    ebp = (state.scale >> 0xb) * edi
                     # 00468177
-                    if state.value < ebp:
-                        state.scale = ebp
-                        ebp = ((0x800 - edi) >> 5) + edi
-                        state.thresholds[state.sp_4c//2] = ebp & 0xFFFF
+                    if state.get_bit(state.sp_4c//2) == 0:
                         ecx = ecx * 2
                         edx = ~edx
                     # 00468192
                     else:
-                        state.scale -= ebp
-                        state.value -= ebp
-                        edi = edi - (edi >> 5)
-                        state.thresholds[state.sp_4c//2] = edi & 0xFFFF
                         ecx = ecx * 2 + 1
                     ebx = ebx & edx
             # 004681B9
@@ -159,48 +138,22 @@ def mischief_unpack(byte_input):
             state.out_pos += 1
             state.sp_18 = TABLE_50B8D8[state.sp_18]
             continue
-        # 004681E1
-        ecx = state.thresholds[(state.sp_18*2 + 0x180)//2]
-        # 00468200
-        state.renormalize()
-        edx = ((state.scale >> 0x0b) * ecx) & MAXINT
         # 0046821C
-        if state.value < edx:
-            state.scale = edx
-            edx = ((0x800 - ecx) >> 5) + ecx;
-            state.thresholds[(state.sp_18*2 + 0x180)//2] = edx & 0xFFFF
+        if state.get_bit((state.sp_18*2 + 0x180)//2) == 0:
             state.sp_18 += 0x0c
             ecx = 0x664
         # 00468241
         else:
-            state.scale -= edx
-            state.value -= edx
-            ecx -= ecx >> 5
-            state.thresholds[(state.sp_18*2 + 0x180)//2] = ecx & 0xFFFF
             # 00468260
             if not state.sp_44 and not state.out_pos:
                 return -1
-            edx = state.thresholds[(state.sp_18*2 + 0x198)//2]
-            # 00468278
-            state.renormalize()
-            ecx = (state.scale >> 0xb) * edx
             # 00468294
-            if state.value < ecx:
-                ebx = ((0x800 - edx) >> 5) + edx
+            if state.get_bit((state.sp_18*2 + 0x198)//2) == 0:
                 edx = ((state.sp_18 + 0xf) << 4) + state.sp_30
-                state.thresholds[(state.sp_18*2 + 0x198)//2] = ebx & 0xFFFF
                 ebx = edx*2
-                edx = state.thresholds[ebx//2]
-                state.scale = ecx
-                # 004682BF
-                state.renormalize()
-                ecx = (state.scale >> 0xb) * edx
                 # 004682E3
-                if state.value < ecx:
-                    state.scale = ecx
-                    ecx = ((0x800 - edx) >> 5) + edx
+                if state.get_bit(ebx//2) == 0:
                     edx = distance
-                    state.thresholds[ebx//2] = ecx & 0xFFFF
                     # 00468309
                     ebx = state.out_length if state.out_pos < edx else 0
                     ebx = ebx - edx + state.out_pos
@@ -209,48 +162,18 @@ def mischief_unpack(byte_input):
                     # 00468322
                     state.sp_18 = 0x9 if state.sp_18 < 7 else 0xB
                     continue
-                state.scale -= ecx
-                state.value -= ecx
-                edx -= edx >> 5
-                state.thresholds[ebx//2] = edx & 0xFFFF
             # 00468348
             else:
-                state.scale -= ecx
-                state.value -= ecx
-                edx -= (edx >> 5)
-                state.thresholds[(state.sp_18*2+0x198)//2] = edx & 0xFFFF
-                ecx = state.thresholds[(state.sp_18*2+0x1B0)//2]
-                # 0046836D
-                state.renormalize()
-                edx = (state.scale >> 0xb) * ecx
                 # 00468389
-                if state.value < edx:
-                    state.scale = edx
-                    edx = ((0x800 - ecx) >> 5) + ecx
+                if state.get_bit((state.sp_18*2+0x1B0)//2) == 0:
                     ecx = state.sp_28
-                    state.thresholds[(state.sp_18*2+0x1B0)//2] = edx & 0xFFFF
                 # 004683A5
                 else:
-                    state.scale -= edx
-                    state.value -= edx
-                    ecx = ecx - (ecx >> 5)
-                    state.thresholds[(state.sp_18*2+0x1B0)//2] = ecx & 0xFFFF
-                    ecx = state.thresholds[(state.sp_18*2+0x1C8)//2]
-                    # 004683CA
-                    state.renormalize()
-                    edx = (state.scale >> 0xb) * ecx
                     # 004683E1
-                    if state.value < edx:
-                        state.scale = edx
-                        edx = ((0x800 - ecx) >> 5) + ecx
+                    if state.get_bit((state.sp_18*2+0x1C8)//2) == 0:
                         ecx = state.sp_2c
-                        state.thresholds[(state.sp_18*2+0x1C8)//2] = edx & 0xFFFF
                     # 00468402
                     else:
-                        state.scale -= edx
-                        state.value -= edx
-                        ecx -= ecx >> 5
-                        state.thresholds[(state.sp_18*2+0x1C8)//2] = ecx & 0xFFFF
                         ecx = state.sp_40
                         state.sp_40 = state.sp_2c
                     state.sp_2c = state.sp_28
@@ -259,66 +182,33 @@ def mischief_unpack(byte_input):
             # 00468437
             state.sp_18 = 8 if state.sp_18 < 7 else 0xb
             ecx = 0xA68
-        edx = state.thresholds[ecx//2]
-        # 0046844f
-        state.renormalize()
-        edi = (state.scale >> 0xb) * edx
         # 0046846B
-        if state.value < edi:
+        if state.get_bit(ecx//2) == 0:
             ebx = state.sp_30 * 2
-            state.scale = edi
-            edi = ((0x800 - edx) >> 5) + edx
-            state.thresholds[ecx//2] = edi & 0xFFFF
             ebx = ecx + state.sp_30 * 2 * 8 + 4
             ebp = 0
             state.sp_30 = 8
         # 00468497
         else:
-            state.scale -= edi
-            state.value -= edi
-            edx -= edx >> 5
-            state.thresholds[ecx//2] = edx & 0xFFFF
-            edx = state.thresholds[(ecx + 2)//2]
-            # 004684B3
-            state.renormalize()
-            edi = (state.scale >> 0xb) * edx
             # 004684CF
-            if state.value < edi:
+            if state.get_bit((ecx + 2)//2) == 0:
                 ebx = state.sp_30
-                state.scale = edi
-                edi = ((0x800 - edx) >> 5) + edx
-                state.thresholds[(ecx+2)//2] = edi & 0xFFFF
                 ebx = ecx + ebx * 2 * 8 + 0x104
                 ebp = 8
                 state.sp_30 = 8
             # 004684F9
             else:
-                state.scale -= edi
-                state.value -= edi
-                edx = edx - (edx >> 5)
-                state.thresholds[(ecx+2)//2] = edx & 0xFFFF
                 ebx = ecx+0x204
                 ebp = 0x10
                 state.sp_30 = 0x100
         # 0046851D
         edi = 1
         while edi < state.sp_30:
-            ecx = state.thresholds[(ebx+edi*2)//2]
-            # 00468522
-            state.renormalize()
-            edx = (state.scale >> 0xb) * ecx
             # 0046854A
-            if state.value < edx:
-                state.scale = edx
-                edx = ((0x800 - ecx) >> 5) + ecx
-                state.thresholds[(ebx+edi*2)//2] = edx & 0xFFFF
+            if state.get_bit((ebx+edi*2)//2) == 0:
                 edi += edi
             # 00468560
             else:
-                state.scale -= edx
-                state.value -= edx
-                ecx = ecx - (ecx >> 5)
-                state.thresholds[(ebx+edi*2)//2] = ecx & 0xFFFF
                 edi += edi + 1
         # 0046857D
         ebp -= state.sp_30
@@ -336,18 +226,9 @@ def mischief_unpack(byte_input):
             tmpvar2 = 1
             while tmpvar2 < 0x40:
                 tmpvar2 = tmpvar2 * 2
-                edx = state.thresholds[(ecx + tmpvar2)//2]
-                state.renormalize()
-                edi = (state.scale >> 0xb) * edx
-                if state.value < edi:
-                    state.scale = edi
-                    edi = ((0x800 - edx) >> 5) + edx
-                    state.thresholds[(tmpvar2+ecx)//2] = edi & 0xFFFF
+                if state.get_bit((ecx + tmpvar2)//2) == 0:
+                    pass
                 else:
-                    state.scale -= edi
-                    state.value -= edi
-                    edx -= edx >> 5
-                    state.thresholds[(tmpvar2+ecx)//2] = edx & 0xFFFF
                     tmpvar2 += 1
 
             ebp = tmpvar2 - 0x40
@@ -367,23 +248,12 @@ def mischief_unpack(byte_input):
                     ebx = ecx*2+0x55e
                     # 004687CE
                     while state.sp_30:
-                        edx = state.thresholds[(ebx+edi*2)//2]
-                        # 004687D9
-                        state.renormalize()
-                        ecx = (state.scale >> 0xb) * edx
                         # 004687F8
-                        if state.value < ecx:
-                            state.scale = ecx
-                            ecx = ((0x800 - edx) >> 5) + edx
-                            state.thresholds[(ebx+edi*2)//2] = ecx & 0xFFFF
+                        if state.get_bit((ebx+edi*2)//2) == 0:
                             edi += edi
                         # 0046880E
                         else:
-                            state.scale -= ecx
-                            state.value -= ecx
-                            edx -= edx >> 5
                             ebp = ebp | state.sp_40
-                            state.thresholds[(ebx+edi*2)//2] = edx & 0xFFFF
                             edi += edi + 1
                         state.sp_40 = state.sp_40 << 1
                         state.sp_30 -= 1
@@ -406,18 +276,9 @@ def mischief_unpack(byte_input):
                     tmpvar3 = 1
                     for tmpvar4 in range(4):
                         tmpvar3 = tmpvar3 * 2
-                        edx = state.thresholds[(0x644 + tmpvar3)//2]
-                        state.renormalize()
-                        edi = (state.scale >> 0xb) * edx
-                        if state.value < edi:
-                            state.scale = edi
-                            edi = ((0x800 - edx) >> 5) + edx
-                            state.thresholds[(0x644 + tmpvar3)//2] = edi & 0xFFFF
+                        if state.get_bit((0x644 + tmpvar3)//2) == 0:
+                            pass
                         else:
-                            state.scale -= edi
-                            state.value -= edi
-                            edx -= edx >> 5
-                            state.thresholds[(0x644 + tmpvar3)//2] = edx & 0xFFFF
                             ebp = ebp | (1 << tmpvar4)
                             tmpvar3 += 1
                     # 004689F6
