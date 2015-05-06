@@ -90,8 +90,6 @@ def mischief_unpack(byte_input):
     '''
     state = UnpackerState(byte_input)
     distance = 1
-    sp_50 = 0
-
 
     # 00467FE1
     while state.in_pos < state.in_length and state.out_pos < state.out_length:
@@ -103,10 +101,9 @@ def mischief_unpack(byte_input):
         if state.get_bit(ebx//2) == 0:
             ebp += 0xe6c
             # 0046804A
-            if state.out_pos:
-                ecx2 = state.out_pos or state.out_length
+            if state.out_pos != 0:
                 # 3 is sp_58
-                ebp += ((state.decoded[ecx2 - 1] >> (8 - 3)) + ((state.out_pos & sp_50) << 3)) * 0x600
+                ebp += (state.decoded[state.out_pos - 1] >> (8 - 3)) * 0x600
                 state.sp_30 = ebp
             # 0046808F
             if state.sp_18 < 7:
@@ -153,7 +150,7 @@ def mischief_unpack(byte_input):
         # 00468241
         else:
             # 00468260
-            if not state.out_pos:
+            if state.out_pos == 0:
                 return -1
             # 00468294
             if state.get_bit((state.sp_18*2 + 0x198)//2) == 0:
@@ -294,8 +291,7 @@ def mischief_unpack(byte_input):
             ecx = distance
             distance = ebp + 1
             # 00468A2B
-            if (distance and 0 >= distance) \
-                    or 0 >= state.out_pos:
+            if (distance < 0) or (state.out_pos <= 0):
                 return -3
             # 00468A31
             state.sp_18 = 0x7 if state.sp_18 < 0x13 else 0xa
