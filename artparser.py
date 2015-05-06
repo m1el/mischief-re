@@ -101,7 +101,7 @@ def mischief_unpack(byte_input):
             # 0046804A
             if state.out_pos != 0:
                 ebp += (state.decoded[state.out_pos - 1] >> (8 - 3)) * 0x300
-                state.sp_30 = ebp*2
+                state.sp_30 = ebp
             # 0046808F
             if state.sp_18 < 7:
                 ecx = 1
@@ -126,7 +126,7 @@ def mischief_unpack(byte_input):
                     edi = tmpvar1 * 2
                     tmpvar1 = edi
                     edx = ebx & edi
-                    sp_4c = state.sp_30//2 + edx + ebx + ecx
+                    sp_4c = state.sp_30 + edx + ebx + ecx
                     # 00468177
                     if state.get_bit(sp_4c) == 0:
                         ecx = ecx * 2
