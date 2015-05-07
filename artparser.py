@@ -122,17 +122,13 @@ def mischief_unpack(byte_input):
                 ecx = state.get_n_bits(8, ebp)
             # 004680FB
             else:
-                edi = state.out_length if state.out_pos < distance else 0
-                edi -= distance
                 ebx = 0x100
-                edi = state.decoded[edi + state.out_pos]
                 ecx = 1
-                tmpvar1 = edi
+                tmpvar1 = state.decoded[(state.out_pos - distance) % state.out_length]
                 # 00468127
                 while ecx < 0x100:
-                    edi = tmpvar1 * 2
-                    tmpvar1 = edi
-                    edx = ebx & edi
+                    tmpvar1 *= 2
+                    edx = ebx & tmpvar1
                     sp_4c = state.sp_30 + edx + ebx + ecx
                     # 00468177
                     if state.get_bit(sp_4c) == 0:
@@ -141,7 +137,7 @@ def mischief_unpack(byte_input):
                     # 00468192
                     else:
                         ecx = ecx * 2 + 1
-                    ebx = ebx & edx
+                    ebx &= edx
             # 004681B9
             state.decoded[state.out_pos] = ecx & 0xFF
             state.out_pos += 1
