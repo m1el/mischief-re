@@ -212,7 +212,7 @@ def mischief_unpack(byte_input):
             else:
                 edi += edi + 1
         # 0046857D
-        ebp -= state.sp_30
+        edi -= state.sp_30
         edi += ebp
         requested_copy_len = edi
         # 0046858A
