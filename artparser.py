@@ -69,19 +69,19 @@ class UnpackerState():
             self.scale -= scaled_threshold
             return 1
     def get_n_bits(self, n, contextbase):
-        value = 1
-        limit = 1 << n
-        while value < limit:
-            value = value * 2 + self.get_bit(contextbase + value)
-        return value - limit
-    def get_n_bits_flipped(self, n, contextbase):
-        ctxoffset = 1
         value = 0
         for bitnum in range(n):
-            bit = self.get_bit(contextbase + ctxoffset)
-            ctxoffset = ctxoffset * 2 + bit
-            if bit: value |= (1 << bitnum)
+            bit = self.get_bit(contextbase + (1 << bitnum) + value)
+            value = (value << 1) + bit
         return value
+    def get_n_bits_flipped(self, n, contextbase):
+        value = 0
+        flipped_value = 0
+        for bitnum in range(n):
+            bit = self.get_bit(contextbase + (1 << bitnum) + value)
+            value = (value << 1) + bit
+            flipped_value |= (bit << bitnum)
+        return flipped_value
 
     def get_raw_bit(self):
         self.renormalize()
