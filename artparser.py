@@ -68,6 +68,21 @@ class UnpackerState():
             self.value -= scaled_threshold
             self.scale -= scaled_threshold
             return 1
+    def get_n_bits(self, n, contextbase):
+        value = 1
+        limit = 1 << n
+        while value < limit:
+            value = value * 2 + self.get_bit(contextbase + value)
+        return value - limit
+    def get_n_bits_flipped(self, n, contextbase):
+        ctxoffset = 1
+        value = 0
+        for bitnum in range(n):
+            bit = self.get_bit(contextbase + ctxoffset)
+            ctxoffset = ctxoffset * 2 + bit
+            if bit: value |= (1 << bitnum)
+        return value
+
     def get_raw_bit(self):
         self.renormalize()
         self.scale >>= 1
@@ -104,15 +119,7 @@ def mischief_unpack(byte_input):
                 state.sp_30 = ebp
             # 0046808F
             if state.sp_18 < 7:
-                ecx = 1
-                # 0046809F
-                while ecx < 0x100:
-                    # 004680C2
-                    if state.get_bit(ebp+ecx) == 0:
-                        ecx = ecx * 2
-                    # 004680D9
-                    else:
-                        ecx = ecx * 2 + 1
+                ecx = state.get_n_bits(8, ebp)
             # 004680FB
             else:
                 edi = state.out_length if state.out_pos < distance else 0
@@ -185,35 +192,22 @@ def mischief_unpack(byte_input):
             ecx = 0x534
         # 0046846B
         if state.get_bit(ecx) == 0:
-            ebx = state.sp_30 * 2
             ebx = ecx + state.sp_30 * 8 + 2
             ebp = 0
-            state.sp_30 = 8
+            bits = 3
         # 00468497
         else:
             # 004684CF
             if state.get_bit(ecx + 1) == 0:
-                ebx = state.sp_30
-                ebx = ecx + ebx * 8 + 0x82
+                ebx = ecx + state.sp_30 * 8 + 0x82
                 ebp = 8
-                state.sp_30 = 8
+                bits = 3
             # 004684F9
             else:
                 ebx = ecx + 0x102
                 ebp = 0x10
-                state.sp_30 = 0x100
-        # 0046851D
-        edi = 1
-        while edi < state.sp_30:
-            # 0046854A
-            if state.get_bit(ebx +edi) == 0:
-                edi += edi
-            # 00468560
-            else:
-                edi += edi + 1
-        # 0046857D
-        edi -= state.sp_30
-        edi += ebp
+                bits = 8
+        edi = ebp + state.get_n_bits(bits, ebx)
         requested_copy_len = edi
         # 0046858A
         if state.sp_18 >= 0x0c:
@@ -224,14 +218,7 @@ def mischief_unpack(byte_input):
             ebp = state.in_pos
             ecx = ((ecx << 6) + 0x1B0)
             # 004685AE-00468794 (unwound loop)
-            tmpvar2 = 1
-            while tmpvar2 < 0x40:
-                if state.get_bit(ecx + tmpvar2) == 0:
-                    tmpvar2 = tmpvar2 * 2
-                else:
-                    tmpvar2 = tmpvar2 * 2 + 1
-
-            ebp = tmpvar2 - 0x40
+            ebp = state.get_n_bits(6, ecx)
             # 00468794
             if ebp >= 4:
                 edx = ebp
@@ -242,21 +229,10 @@ def mischief_unpack(byte_input):
                 # 004687B3
                 if edx < 0x0e:
                     ebp = ebp << (ecx & 0xFF)
-                    edi = 1
-                    state.sp_40 = 1
                     ecx = ebp - edx
                     ebx = ecx + 0x2AF
                     # 004687CE
-                    while state.sp_30:
-                        # 004687F8
-                        if state.get_bit(ebx+edi) == 0:
-                            edi += edi
-                        # 0046880E
-                        else:
-                            ebp = ebp | state.sp_40
-                            edi += edi + 1
-                        state.sp_40 = state.sp_40 << 1
-                        state.sp_30 -= 1
+                    ebp |= state.get_n_bits_flipped(state.sp_30, ebx)
                 # 00468831
                 else:
                     ecx -= 4
@@ -267,13 +243,7 @@ def mischief_unpack(byte_input):
                         state.sp_30 -= 1
                     # 0046886D-004689F6 (unwound loop)
                     ebp = ebp << 4
-                    tmpvar3 = 1
-                    for tmpvar4 in range(4):
-                        if state.get_bit(0x322 + tmpvar3) == 0:
-                            tmpvar3 = tmpvar3 * 2
-                        else:
-                            ebp = ebp | (1 << tmpvar4)
-                            tmpvar3 = tmpvar3 * 2 + 1
+                    ebp |= state.get_n_bits_flipped(4, 0x322)
                     # 004689F6
                     if ebp == -1:
                         requested_copy_len += 0x112
