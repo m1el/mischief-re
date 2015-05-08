@@ -82,6 +82,26 @@ class UnpackerState():
             value = (value << 1) + bit
             flipped_value |= (bit << bitnum)
         return flipped_value
+    def get_byte_with_reference(self, refbyte, contextbase):
+        mismatch_found = False
+        value = 0
+        # 00468127
+        for bitnr in range(8):
+            ctxoffset = (1 << bitnr)
+            if mismatch_found:
+                ctxoffset += 0
+            else:
+                refbit = ((refbyte << bitnr) & 0x80) != 0
+                if refbit == 0:
+                    ctxoffset += 0x100
+                else:
+                    ctxoffset += 0x200
+            bit = self.get_bit(contextbase + ctxoffset + value)
+            value = value * 2 + bit
+            if bit != refbit:
+                mismatch_found = True
+        return value
+
 
     def get_raw_bit(self):
         self.renormalize()
@@ -122,25 +142,8 @@ def mischief_unpack(byte_input):
                 ecx = state.get_n_bits(8, ebp)
             # 004680FB
             else:
-                mismatch_found = False
-                ecx = 0
-                refbyte = state.decoded[(state.out_pos - distance) % state.out_length]
-                # 00468127
-                for bitnr in range(8):
-                    ctxoffset = (1 << bitnr)
-                    if mismatch_found:
-                        ctxoffset += 0
-                    else:
-                        refbit = ((refbyte << bitnr) & 0x80) != 0
-                        if refbit == 0:
-                            ctxoffset += 0x100
-                        else:
-                            ctxoffset += 0x200
-                    bit = state.get_bit(state.sp_30 + ctxoffset + ecx)
-                    ecx = ecx * 2 + bit
-                    if bit != refbit:
-                        mismatch_found = True
-            # 004681B9
+                ref_byte = state.decoded[(state.out_pos - distance) % state.out_length]
+                ecx = state.get_byte_with_reference(ref_byte, state.sp_30)
             state.decoded[state.out_pos] = ecx & 0xFF
             state.out_pos += 1
             state.sp_18 = TABLE_50B8D8[state.sp_18]
