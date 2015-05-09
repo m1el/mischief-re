@@ -157,7 +157,6 @@ def mischief_unpack(byte_input):
 
     # 00467FE1
     while not output.finished(out_length):
-        output.get_byte_in_dword()
         refined_state_nr = (state_nr << 4) + output.get_byte_in_dword()
         # 0046801D
         if arith.get_bit(refined_state_nr) == 0:
