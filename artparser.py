@@ -62,10 +62,23 @@ class BinaryArithmeticDecoder():
             self.value -= self.scale
             return 1
 
-class BitGetter():
+class AdaptiveBitGetter():
+    '''
+    Reads bits from a BinaryArithmeticDecoder, adapting the expected
+    probability from the bits seen up to now. The adaption happens in
+    an instance variable of the AdaptiveBitGetter, so different contexts
+    with different probabilities can be obtained by using multiple
+    AdaptiveBitGetters.
+
+    An exponential sliding average is used, where the current threshold
+    is weighted 31 parts and the new symbol is weighed one part.
+    '''
+    __slots__ = ['decoder', 'threshold']
     def __init__(self, decoder):
         self.decoder = decoder
-        self.threshold = decoder.center_threshold
+        self.threshold = 0x400
+        # get_bit hardcodes 0x40 which is (2*center_threshold) >> 5.
+        assert decoder.center_threshold == 0x400
 
     def get_bit(self):
         bit = self.decoder.get_bit(self.threshold)
@@ -76,8 +89,17 @@ class BitGetter():
         return bit
 
 class UnaryGetter():
+    '''
+    Reads a numbers from an BinaryArithmeticDecoder that are binarized
+    using unary encoding. A different context is used for each bit of
+    the number.
+
+    The result of get_value is the number of "one" bits encountered
+    before either a "zero" bit has been read or maxval bits have been
+    consumed.
+    '''
     def __init__(self, decoder, maxval):
-        self.getters = [BitGetter(decoder) for _ in range(maxval)]
+        self.getters = [AdaptiveBitGetter(decoder) for _ in range(maxval)]
 
     def get_value(self):
         result = 0
@@ -88,8 +110,18 @@ class UnaryGetter():
         return result
 
 class MSBFirstGetter():
+    '''
+    Reads a numbers from an BinaryArithmeticDecoder that are binarized
+    using MSB first binary representation. The context used when reading
+    a bit depends on all the earlier bits read for this number. So
+    the MSB is always obtained using the same context, while the second-most
+    significant bit is obtained using different contexts whether the MSB
+    is one or zero. The third-most significant bit is decoded using one
+    out of four contexts and so on.
+    '''
     def __init__(self, decoder, bitcount):
-        self.layers = [[BitGetter(decoder) for _ in range(1<<layer)] for layer in range(bitcount)]
+        self.layers = [[AdaptiveBitGetter(decoder) for _ in range(1<<layer)]
+                       for layer in range(bitcount)]
 
     def get_value(self):
         value = 0
@@ -98,8 +130,18 @@ class MSBFirstGetter():
         return value
 
 class LSBFirstGetter():
+    '''
+    Reads a numbers from an BinaryArithmeticDecoder that are binarized
+    using LSB first binary representation. The context used when reading
+    a bit depends on all the earlier bits read for this number. So
+    the LSB is always obtained using the same context, while the second-least
+    significant bit is obtained using different contexts whether the LSB
+    is one or zero. The third-least significant bit is decoded using one
+    out of four contexts and so on.
+    '''
     def __init__(self, decoder, bitcount):
-        self.layers = [[BitGetter(decoder) for _ in range(1<<layer)] for layer in range(bitcount)]
+        self.layers = [[AdaptiveBitGetter(decoder) for _ in range(1<<layer)]
+                       for layer in range(bitcount)]
 
     def get_value(self):
         value = 0
@@ -142,7 +184,7 @@ class LZ77Output():
 
 class LiteralGetter():
     def __init__(self, decoder):
-        self.layers = [[[BitGetter(decoder) for _ in range(1<<layer)] for _ in range(3)] for layer in range(8)]
+        self.layers = [[[AdaptiveBitGetter(decoder) for _ in range(1<<layer)] for _ in range(3)] for layer in range(8)]
 
     def get_value(self, context_byte):
         use_context = context_byte != None
@@ -202,9 +244,9 @@ class DistanceGetter():
 class State():
     def __init__(self, decoder, state_after_literal = None):
         self.after_literal = state_after_literal or self
-        self.is_reference_code = [BitGetter(decoder) for _ in range(4)]
+        self.is_reference_code = [AdaptiveBitGetter(decoder) for _ in range(4)]
         self.get_reference_kind = UnaryGetter(decoder, 4)
-        self.get_kind_1_nontrivial = [BitGetter(decoder) for _ in range(4)]
+        self.get_kind_1_nontrivial = [AdaptiveBitGetter(decoder) for _ in range(4)]
         
 
 def mischief_unpack(byte_input):
