@@ -21,17 +21,29 @@ class MRUList():
             (self.history[index], self.history[0:index])
         return self.history[0]
 
-class ArithDecoder():
+class BinaryArithmeticDecoder():
+    '''
+    Decoder for data that is encoded using binary arithmetic coding.
+    This implementation uses an integer threshold in the range 1..0x7ff,
+    with 0x400 being used as (quite close to) neutral value.
+
+    A function get_raw_bit, that decodes 0 and 1 with equal probability
+    and incurs less rounding errors than get_bit with a threshold of 0x400
+    is also provided.
+    '''
+    center_threshold = 0x400
+
+    __slots__ = ['scale', 'value', 'input']
     def __init__(self, byte_input):
         self.scale = 0xFFFFFFFF
         (self.value,) = struct.unpack('>I', byte_input[0:4])
         self.input = iter(byte_input[4:] + bytearray([0,0,0,0]))
-    def renormalize(self):
+    def _renormalize(self):
         if self.scale < 0x01000000:
             self.scale <<= 8
             self.value = (self.value << 8) | next(self.input)
-    def get_bit_(self, threshold):
-        self.renormalize()
+    def get_bit(self, threshold):
+        self._renormalize()
         scaled_threshold = ((self.scale >> 0x0b) * threshold)
         if self.value < scaled_threshold:
             self.scale = scaled_threshold
@@ -42,7 +54,7 @@ class ArithDecoder():
             return 1
 
     def get_raw_bit(self):
-        self.renormalize()
+        self._renormalize()
         self.scale >>= 1
         if self.value < self.scale:
             return 0
@@ -53,10 +65,10 @@ class ArithDecoder():
 class BitGetter():
     def __init__(self, decoder):
         self.decoder = decoder
-        self.threshold = 0x400
+        self.threshold = decoder.center_threshold
 
     def get_bit(self):
-        bit = self.decoder.get_bit_(self.threshold)
+        bit = self.decoder.get_bit(self.threshold)
         if bit == 0:
             self.threshold = (self.threshold - ((self.threshold+0x1f) >> 5)) + 1*0x40
         else:
@@ -200,7 +212,7 @@ def mischief_unpack(byte_input):
     this function unpacks bytes and returns an unpacked byte array
     '''
     (out_length,) = struct.unpack('I', byte_input[0:4])
-    decoder = ArithDecoder(byte_input[5:])
+    decoder = BinaryArithmeticDecoder(byte_input[5:])
     output = LZ77Output()
 
     # literal_getters is indexed by the top 3 bits of the previous byte
