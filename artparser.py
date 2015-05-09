@@ -54,7 +54,7 @@ class ArithDecoder():
     def renormalize(self):
         if self.scale < 0x01000000:
             self.scale <<= 8
-            self.value = (self.value << 8) | self.input.next()
+            self.value = (self.value << 8) | next(self.input)
     def get_bit(self, contextidx):
         self.renormalize()
         threshold = self.thresholds[contextidx]
@@ -75,11 +75,9 @@ class ArithDecoder():
             value = (value << 1) + bit
         return value
     def get_n_bits_flipped(self, n, contextbase):
-        value = 0
         flipped_value = 0
         for bitnum in range(n):
-            bit = self.get_bit(contextbase + (1 << bitnum) + value)
-            value = (value << 1) + bit
+            bit = self.get_bit(contextbase + (1 << bitnum) + flipped_value)
             flipped_value |= (bit << bitnum)
         return flipped_value
     def get_byte_with_reference(self, refbyte, contextbase):
