@@ -152,6 +152,13 @@ class LSBFirstGetter():
         return value
 
 class LZ77Output():
+    '''
+    Generic LZ77 output handling.
+
+    This class manages an output buffer, and is able to append single bytes
+    or copy from earlier parts of the buffer, given a distance to the end.
+    A distance of 0 means the last byte already stored.
+    '''
     def __init__(self):
         self.decoded = bytearray()
 
@@ -179,12 +186,30 @@ class LZ77Output():
 
     def get_length(self):
         return len(self.decoded)
-        if len(self.decoded) > expected_length:
-            raise Exception("Unpacking generated excess data")
 
 class LiteralGetter():
+    '''
+    Contains the algorithm to obtain the value of a literal byte
+    for the mischief decompressor.
+
+    Obtaining a literal byte can optionally make use of a context byte.
+    If the previous LZ77 was a copy operation, the first byte not copied
+    is used as context byte (with the expectation that the byte to decode
+    is similar).
+
+    If a context byte is given, bits are decoded using different contexts
+    whether the context byte has a one or a zero at that position. As soon
+    as a mismatch between the context byte and the newly decoded byte is
+    detected (or if no context byte is given), decoding switches to a third
+    set of contexts (and behaves like the MSBFirstGetter).
+    '''
     def __init__(self, decoder):
-        self.layers = [[[AdaptiveBitGetter(decoder) for _ in range(1<<layer)] for _ in range(3)] for layer in range(8)]
+        self.no_context_layers =   [[AdaptiveBitGetter(decoder) for _ in range(1<<layer)]
+                                    for layer in range(8)]
+        self.context_zero_layers = [[AdaptiveBitGetter(decoder) for _ in range(1<<layer)]
+                                    for layer in range(8)]
+        self.context_one_layers =  [[AdaptiveBitGetter(decoder) for _ in range(1<<layer)]
+                                     for layer in range(8)]
 
     def get_value(self, context_byte):
         use_context = context_byte != None
@@ -193,18 +218,29 @@ class LiteralGetter():
             if use_context:
                 refbit = ((context_byte << bitnr) & 0x80) != 0
                 if refbit == 0:
-                    way = 1
+                    layers = self.context_zero_layers
                 else:
-                    way = 2
+                    layers = self.context_one_layers
             else:
-                way = 0
-            bit = self.layers[bitnr][way][value].get_bit()
+                layers = self.no_context_layers
+            bit = layers[bitnr][value].get_bit()
             value = value * 2 + bit
             if use_context and bit != refbit:
                 use_context = False
         return value
 
 class LengthGetter():
+    '''
+    Contains the algorithm to obtain the value of the copy length
+    for the mischief decompressor.
+
+    The length is first classified into one of three ranges (0..7,
+    8..15, 16..271). The position in each range is stored as MSB-first
+    binarized number. For the position in the two short ranges, four
+    subcontexts exist. The number of th subcontext has to be supplied
+    by the caller and is chosen depending on the current LZ77 output
+    position relative to 32-bit-boundaries in the mischief format.
+    '''
     def __init__(self, decoder):
         self.range_getter = UnaryGetter(decoder, 2)
         shared_long_length_getter = MSBFirstGetter(decoder, 8)
@@ -218,6 +254,18 @@ class LengthGetter():
         return base + offset_getter.get_value()
 
 class DistanceGetter():
+    '''
+    Contains the algorithm to obtain the value of the copy distance
+    for the mischief decompressor.
+
+    The distance is first classified into coarse ranges: The distances
+    0 to 3 are directly encoded at this step, while bigger distances
+    of up to 2^32 are divided in 60 ranges, depending on the position
+    of the MSB (31..2) and the value of the second-most significant bit.
+    For distances above 128, some of the bits are stored "raw" without
+    an adaptive context model. The low-order bits for each range are
+    modelled using a different context.
+    '''
     def __init__(self, decoder):
         self.decoder = decoder
         self.coarse_distance_getter = [MSBFirstGetter(decoder, 6) for _ in range(4)]
@@ -242,6 +290,20 @@ class DistanceGetter():
                 return result_high | self.long_distance_low_bits_getter.get_value()
 
 class State():
+    '''
+    State of the mischief decompressor.
+
+    The state consists of a set of models for LZ77 control information,
+    namely the decision whether the next LZ77 symbol is a reference or a
+    literal, the kind of distance encoding for a reference (MRU index vs. 
+    explicitly coded) and the decision whether a reference with the most
+    recently used distance is a "quick one-byte copy" or a longer area.
+
+    Furthermore, the state is linked to a (possibly) different state the
+    decoder should switch to after decoding a literal code in this state.
+    The next state after reference codes are hard-coded in the main
+    decoder procedure.
+    '''
     def __init__(self, decoder, state_after_literal = None):
         self.after_literal = state_after_literal or self
         self.is_reference_code = [AdaptiveBitGetter(decoder) for _ in range(4)]
