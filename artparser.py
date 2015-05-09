@@ -127,31 +127,28 @@ def mischief_unpack(byte_input):
 
     # 00467FE1
     while state.in_pos < state.in_length and state.out_pos < state.out_length:
-        edi = state.sp_18
-        ebx = ((state.out_pos & 3) + (state.sp_18 << 4))
         state.sp_30 = state.out_pos & 3
         # 0046801D
-        if state.get_bit(ebx) == 0:
-            ebp = 0x736
+        if state.get_bit((state.out_pos & 3) + (state.sp_18 << 4)) == 0:
+            single_byte_context = 0x736
             # 0046804A
             if state.out_pos != 0:
-                ebp += (state.decoded[state.out_pos - 1] >> (8 - 3)) * 0x300
-                state.sp_30 = ebp
+                single_byte_context += (state.decoded[state.out_pos - 1] >> (8 - 3)) * 0x300
             # 0046808F
             if state.sp_18 < 7:
-                ecx = state.get_n_bits(8, ebp)
+                next_byte = state.get_n_bits(8, single_byte_context)
             # 004680FB
             else:
                 ref_byte = state.decoded[(state.out_pos - distance) % state.out_length]
-                ecx = state.get_byte_with_reference(ref_byte, state.sp_30)
-            state.decoded[state.out_pos] = ecx & 0xFF
+                next_byte = state.get_byte_with_reference(ref_byte, single_byte_context)
+            state.decoded[state.out_pos] = next_byte
             state.out_pos += 1
             state.sp_18 = TABLE_50B8D8[state.sp_18]
             continue
         # 0046821C
         if state.get_bit(state.sp_18 + 0xC0) == 0:
             state.sp_18 += 0x0c
-            ecx = 0x332
+            len_context = 0x332
         # 00468241
         else:
             # 00468260
@@ -159,14 +156,10 @@ def mischief_unpack(byte_input):
                 return -1
             # 00468294
             if state.get_bit(state.sp_18 + 0xCC) == 0:
-                edx = ((state.sp_18 + 0xf) << 4) + state.sp_30
                 # 004682E3
-                if state.get_bit(edx) == 0:
-                    edx = distance
+                if state.get_bit((state.sp_18 << 4) + state.sp_30 + 0xF0) == 0:
                     # 00468309
-                    ebx = state.out_length if state.out_pos < edx else 0
-                    ebx = ebx - edx + state.out_pos
-                    state.decoded[state.out_pos] = state.decoded[ebx]
+                    state.decoded[state.out_pos] = state.decoded[(state.out_pos - distance) % state.out_length]
                     state.out_pos += 1
                     # 00468322
                     state.sp_18 = 0x9 if state.sp_18 < 7 else 0xB
@@ -175,86 +168,74 @@ def mischief_unpack(byte_input):
             else:
                 # 00468389
                 if state.get_bit(state.sp_18+0xD8) == 0:
-                    ecx = state.sp_28
+                    new_distance = state.sp_28
                 # 004683A5
                 else:
                     # 004683E1
                     if state.get_bit(state.sp_18+0xE4) == 0:
-                        ecx = state.sp_2c
+                        new_distance = state.sp_2c
                     # 00468402
                     else:
-                        ecx = state.sp_40
+                        new_distance = state.sp_40
                         state.sp_40 = state.sp_2c
                     state.sp_2c = state.sp_28
                 state.sp_28 = distance
-                distance = ecx
+                distance = new_distance
             # 00468437
             state.sp_18 = 8 if state.sp_18 < 7 else 0xb
-            ecx = 0x534
+            len_context = 0x534
         # 0046846B
-        if state.get_bit(ecx) == 0:
-            ebx = ecx + state.sp_30 * 8 + 2
-            ebp = 0
-            bits = 3
+        if state.get_bit(len_context) == 0:
+            len_context += state.sp_30 * 8 + 2
+            len_base = 0
+            len_bits = 3
         # 00468497
         else:
             # 004684CF
-            if state.get_bit(ecx + 1) == 0:
-                ebx = ecx + state.sp_30 * 8 + 0x82
-                ebp = 8
-                bits = 3
+            if state.get_bit(len_context + 1) == 0:
+                len_context += state.sp_30 * 8 + 0x82
+                len_base = 8
+                len_bits = 3
             # 004684F9
             else:
-                ebx = ecx + 0x102
-                ebp = 0x10
-                bits = 8
-        edi = ebp + state.get_n_bits(bits, ebx)
-        requested_copy_len = edi
+                len_context += 0x102
+                len_base = 0x10
+                len_bits = 8
+        requested_copy_len = len_base + state.get_n_bits(len_bits, len_context)
         # 0046858A
         if state.sp_18 >= 0x0c:
-            ecx = edi
-            # 00468595
-            if edi >= 4:
-                ecx = 3
-            ebp = state.in_pos
-            ecx = ((ecx << 6) + 0x1B0)
             # 004685AE-00468794 (unwound loop)
-            ebp = state.get_n_bits(6, ecx)
+            new_distance_code = state.get_n_bits(6, (min(requested_copy_len,3) << 6) + 0x1B0)
             # 00468794
-            if ebp >= 4:
-                edx = ebp
-                # edi = 1
-                ecx = (ebp >> 1) - 1
-                ebp = (ebp & 1) | 2
-                state.sp_30 = ecx
+            if new_distance_code >= 4:
+                new_distance = (new_distance_code & 1) | 2
+                state.sp_30 = (new_distance_code >> 1) - 1
                 # 004687B3
-                if edx < 0x0e:
-                    ebp = ebp << (ecx & 0xFF)
-                    ecx = ebp - edx
-                    ebx = ecx + 0x2AF
+                if new_distance_code < 0x0e:
+                    new_distance = new_distance << (state.sp_30 & 0xFF)
                     # 004687CE
-                    ebp |= state.get_n_bits_flipped(state.sp_30, ebx)
+                    new_distance |= state.get_n_bits_flipped(state.sp_30, new_distance - new_distance_code + 0x2AF)
                 # 00468831
                 else:
-                    ecx -= 4
-                    state.sp_30 = ecx
+                    state.sp_30 -= 4
                     # 00468846
                     while state.sp_30:
-                        ebp = state.get_raw_bit() + (ebp * 2)
+                        new_distance = state.get_raw_bit() + (new_distance * 2)
                         state.sp_30 -= 1
                     # 0046886D-004689F6 (unwound loop)
-                    ebp = ebp << 4
-                    ebp |= state.get_n_bits_flipped(4, 0x322)
+                    new_distance = new_distance << 4
+                    new_distance |= state.get_n_bits_flipped(4, 0x322)
                     # 004689F6
-                    if ebp == -1:
+                    if new_distance == -1:
                         requested_copy_len += 0x112
                         state.sp_18 -= 0x0c
                         break
+            else:
+                new_distance = new_distance_code
             # 004689FC
             state.sp_40 = state.sp_2c
             (state.sp_28, state.sp_2c) = (distance, state.sp_28)
-            ecx = distance
-            distance = ebp + 1
+            distance = new_distance + 1
             # 00468A2B
             if (distance < 0) or (state.out_pos <= 0):
                 return -3
@@ -267,8 +248,6 @@ def mischief_unpack(byte_input):
             return -4
         # 00468A5B
         copy_count = min(state.out_length - state.out_pos, requested_copy_len)
-        # 00468A67
-        requested_copy_len -= copy_count
         # 00468A8C
         for _ in xrange(copy_count):
             state.decoded[state.out_pos] = state.decoded[(state.out_pos - distance) % state.out_length]
