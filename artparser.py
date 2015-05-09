@@ -90,11 +90,6 @@ class ArithDecoder():
         self.scale = 0xFFFFFFFF
         (self.value,) = struct.unpack('>I', byte_input[0:4])
         self.input = iter(byte_input[4:] + bytearray([0,0,0,0]))
-        # context allocation map:
-        # 0..BF: decision literal/reference
-        # C0/CC/D8/E4: (12 each) unary code (new distance/mru[0]/mru[1]/mru[2]/mru[3])
-        # F0..1AF: decision: single-byte-copy shortcut on mru[0]
-        self.thresholds = [0x0400] * 0x1B0
     def renormalize(self):
         if self.scale < 0x01000000:
             self.scale <<= 8
@@ -109,15 +104,6 @@ class ArithDecoder():
             self.value -= scaled_threshold
             self.scale -= scaled_threshold
             return 1
-
-    def get_bit(self, contextidx):
-        threshold = self.thresholds[contextidx]
-        bit = self.get_bit_(threshold)
-        if bit == 0:
-            self.thresholds[contextidx] = (threshold - ((threshold+0x1f) >> 5)) + 1*0x40
-        else:
-            self.thresholds[contextidx] = (threshold - ( threshold       >> 5)) + 0*0x40
-        return bit
 
     def get_raw_bit(self):
         self.renormalize()
@@ -139,8 +125,6 @@ class LZ77Output():
 
     # LZ77 distance management
     def set_distance(self, distance):
-        if (distance < 0) or self.is_empty():
-            raise Exception("Error 3")
         self.distance_history.add_value(distance)
 
     def recall_distance(self, index):
@@ -163,7 +147,7 @@ class LZ77Output():
         return len(self.decoded) & 3
 
     def get_last_byte(self):
-        if self.is_empty():
+        if len(self.decoded) == 0:
             return 0
         else:
             return self.decoded[-1]
@@ -173,24 +157,8 @@ class LZ77Output():
 
     def finished(self, expected_length):
         if len(self.decoded) > expected_length:
-            raise Exception("Error 4")
+            raise Exception("Unpacking generated excess data")
         return len(self.decoded) == expected_length
-
-    def is_empty(self):
-        return len(self.decoded) == 0
-
-# State transitions:
-#  0: "stable" state
-
-#  1..6: intermediate states
-
-#  7 -> 4 -> 1 -> 0
-#  8 -> 5 -> 2 -> 0
-#  9 -> 6 -> 3 -> 0
-
-#  A -> 4 -> 1 -> 0
-#  B -> 5 -> 2 -> 0
-next_state = [0, 0, 0, 0, 1, 2, 3, 4, 5, 6, 4, 5]
 
 class LengthGetter():
     def __init__(self, decoder):
@@ -229,72 +197,73 @@ class DistanceGetter():
                     result_high |= self.decoder.get_raw_bit() << bitnum
                 return result_high | self.long_distance_low_bits_getter.get_value()
 
+class State():
+    def __init__(self, decoder, state_after_literal = None):
+        self.after_literal = state_after_literal or self
+        self.is_reference_code = [BitGetter(decoder) for _ in range(4)]
+        self.get_reference_kind = UnaryGetter(decoder, 4)
+        self.get_kind_1_nontrivial = [BitGetter(decoder) for _ in range(4)]
+        
+
 def mischief_unpack(byte_input):
     '''
     this function unpacks bytes and returns an unpacked byte array
     '''
     (out_length,) = struct.unpack('I', byte_input[0:4])
-    arith = ArithDecoder(byte_input[5:])
+    decoder = ArithDecoder(byte_input[5:])
     output = LZ77Output()
-    state_nr = 0
-    length_getters = [LengthGetter(arith), LengthGetter(arith)]
-    literal_getters = [ByteWithContextGetter(arith) for _ in range(8)]
-    distance_getter = DistanceGetter(arith)
 
-    # 00467FE1
+    # literal_getters is indexed by the top 3 bits of the previous byte
+    literal_getters = [ByteWithContextGetter(decoder) for _ in range(8)]
+    new_distance_length_getter = LengthGetter(decoder)
+    reused_distance_length_getter = LengthGetter(decoder)
+    distance_getter = DistanceGetter(decoder)
+
+    base_state = State(decoder)
+    intermediate_after_new_distance = State(decoder, State(decoder, base_state))
+    intermediate_after_reused_distance = State(decoder, State(decoder, base_state))
+    intermediate_after_trivial_copy = State(decoder, State(decoder, base_state))
+    states_after_new_distance = [State(decoder, intermediate_after_new_distance),
+                                 State(decoder, intermediate_after_new_distance)]
+    common_after_reuse_or_trivial_after_ref = \
+        State(decoder, intermediate_after_reused_distance)
+    states_after_reused_distance = [State(decoder, intermediate_after_reused_distance),
+                                    common_after_reuse_or_trivial_after_ref]
+    states_after_trivial_copy = [State(decoder, intermediate_after_trivial_copy),
+                                 common_after_reuse_or_trivial_after_ref]
+
+    last_was_reference = False
+    state = base_state
+
     while not output.finished(out_length):
-        refined_state_nr = (state_nr << 4) + output.get_byte_in_dword()
-        # 0046801D
-        if arith.get_bit(refined_state_nr) == 0:
-            if state_nr < 7:
-                ref_byte = None
-            # 004680FB
-            else:
+        if state.is_reference_code[output.get_byte_in_dword()].get_bit() == 0:
+            # LZ77 literal: add a single (new) byte to the output
+            if last_was_reference:
                 ref_byte = output.get_referenced_byte()
-            output.literal_byte(literal_getters[output.get_last_byte() >> 5].get_value(ref_byte))
-            state_nr = next_state[state_nr]
-            continue
-        # 0046821C
-        fetch_new_distance = arith.get_bit(state_nr + 0xC0) == 0
-        if fetch_new_distance:
-            pass
-        # 00468241
-        else:
-            # 00468260
-            if output.is_empty():
-                raise Exception("Error 1")
-            # 00468294
-            if arith.get_bit(state_nr + 0xCC) == 0:
-                # 004682E3
-                if arith.get_bit(refined_state_nr + 0xF0) == 0:
-                    # 00468309
-                    output.copy_referenced_bytes(1)
-                    # 00468322
-                    state_nr = 0x9 if state_nr < 7 else 0xB
-                    continue
-            # 00468348
             else:
-                # 00468389
-                if arith.get_bit(state_nr+0xD8) == 0:
-                    output.recall_distance(1)
-                # 004683A5
-                else:
-                    # 004683E1
-                    if arith.get_bit(state_nr+0xE4) == 0:
-                        output.recall_distance(2)
-                    # 00468402
-                    else:
-                        output.recall_distance(3)
-            # 00468437
-            state_nr = 8 if state_nr < 7 else 0xb
+                ref_byte = None
+            output.literal_byte(literal_getters[output.get_last_byte() >> 5].get_value(ref_byte))
+            state = state.after_literal
+            last_was_reference = False
+        else:
+            # LZ77 reference: copy a part of previous output
+            reference_kind = state.get_reference_kind.get_value()
+            if reference_kind == 0:
+                copy_len = new_distance_length_getter.get_value(output.get_byte_in_dword()) + 2
+                output.set_distance(distance_getter.get_value(copy_len - 2))
+                state = states_after_new_distance[last_was_reference]
+            elif reference_kind == 1 and \
+                 not state.get_kind_1_nontrivial[output.get_byte_in_dword()].get_bit():
+                copy_len = 1
+                # reuse previous distance
+                state = states_after_trivial_copy[last_was_reference]
+            else:
+                copy_len = reused_distance_length_getter.get_value(output.get_byte_in_dword()) + 2
+                output.recall_distance(reference_kind - 1)
+                state = states_after_reused_distance[last_was_reference]
+            output.copy_referenced_bytes(copy_len)
+            last_was_reference = True
 
-        requested_copy_len = length_getters[fetch_new_distance].get_value(output.get_byte_in_dword())
-        # 0046858A
-        if fetch_new_distance:
-            output.set_distance(distance_getter.get_value(requested_copy_len))
-            state_nr = 0x7 if state_nr < 0x7 else 0xa
-
-        output.copy_referenced_bytes(requested_copy_len + 2)
     return output.get_data()
 
 
