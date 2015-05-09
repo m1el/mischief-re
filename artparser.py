@@ -16,11 +16,40 @@ class MRUList():
         (self.history[0], self.history[1:index+1]) = \
             (self.history[index], self.history[0:index])
 
-#class BitGetter():
-#    def __init__(self, decoder):
-#        self.decoder = decoder
-#        self.threshold = 0x400
-#    def get_bit(self):
+class BitGetter():
+    def __init__(self, decoder):
+        self.decoder = decoder
+        self.threshold = 0x400
+
+    def get_bit(self):
+        bit = self.decoder.get_bit_(self.threshold)
+        if bit == 0:
+            self.threshold = (self.threshold - ((self.threshold+0x1f) >> 5)) + 1*0x40
+        else:
+            self.threshold = (self.threshold - ( self.threshold       >> 5)) + 0*0x40
+        return bit
+
+class UnaryGetter():
+    def __init__(self, decoder, maxval):
+        self.getters = [BitGetter(decoder) for _ in range(maxval)]
+
+    def get_value(self):
+        result = 0
+        for getter in self.getters:
+            if getter.get_bit() == 0:
+                return result
+            result = result + 1
+        return result
+
+class MSBFirstGetter():
+    def __init__(self, decoder, bitcount):
+        self.layers = [[BitGetter(decoder) for _ in range(1<<layer)] for layer in range(bitcount)]
+
+    def get_value(self):
+        value = 0
+        for layer in self.layers:
+            value = (value << 1) + layer[value].get_bit()
+        return value
 
 class ArithDecoder():
     def __init__(self, byte_input):
@@ -186,6 +215,19 @@ class LZ77Output():
 #  B -> 5 -> 2 -> 0
 next_state = [0, 0, 0, 0, 1, 2, 3, 4, 5, 6, 4, 5]
 
+class LengthGetter():
+    def __init__(self, decoder):
+        self.range_getter = UnaryGetter(decoder, 2)
+        shared_long_length_getter = MSBFirstGetter(decoder, 8)
+        # tuples of "base, getter for offset"
+        self.ranges = [[(0, MSBFirstGetter(decoder, 3)),
+                        (8, MSBFirstGetter(decoder, 3)),
+                        (16,shared_long_length_getter)] for _ in range(4)]
+
+    def get_value(self, subcontext):
+        (base, offset_getter) = self.ranges[subcontext][self.range_getter.get_value()]
+        return base + offset_getter.get_value()
+
 def mischief_unpack(byte_input):
     '''
     this function unpacks bytes and returns an unpacked byte array
@@ -194,6 +236,7 @@ def mischief_unpack(byte_input):
     arith = ArithDecoder(byte_input[5:])
     output = LZ77Output()
     state_nr = 0
+    length_getters = [LengthGetter(arith), LengthGetter(arith)]
 
     # 00467FE1
     while not output.finished(out_length):
@@ -212,7 +255,7 @@ def mischief_unpack(byte_input):
         # 0046821C
         fetch_new_distance = arith.get_bit(state_nr + 0xC0) == 0
         if fetch_new_distance:
-            len_context = 0x332
+            pass
         # 00468241
         else:
             # 00468260
@@ -242,25 +285,8 @@ def mischief_unpack(byte_input):
                         output.recall_distance(3)
             # 00468437
             state_nr = 8 if state_nr < 7 else 0xb
-            len_context = 0x534
-        # 0046846B
-        if arith.get_bit(len_context) == 0:
-            len_context += output.get_byte_in_dword() * 8 + 2
-            len_base = 0
-            len_bits = 3
-        # 00468497
-        else:
-            # 004684CF
-            if arith.get_bit(len_context + 1) == 0:
-                len_context += output.get_byte_in_dword() * 8 + 0x82
-                len_base = 8
-                len_bits = 3
-            # 004684F9
-            else:
-                len_context += 0x102
-                len_base = 0x10
-                len_bits = 8
-        requested_copy_len = len_base + arith.get_n_bits(len_bits, len_context)
+
+        requested_copy_len = length_getters[fetch_new_distance].get_value(output.get_byte_in_dword())
         # 0046858A
         if fetch_new_distance:
             # 004685AE-00468794 (unwound loop)
