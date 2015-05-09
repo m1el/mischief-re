@@ -27,13 +27,12 @@ class MRUList():
 class UnpackerState():
     def __init__(self, byte_input):
         self.state_nr = 0
-        self.out_pos = 0 # sp_1c
         self.distance_history = MRUList()
         (self.out_length,) = struct.unpack('I', byte_input[0:4])
         self.scale = 0xFFFFFFFF
         (self.value,) = struct.unpack('>I', byte_input[5:9])
         self.input = iter(byte_input[9:] + bytearray([0,0,0,0]))
-        self.decoded = bytearray(self.out_length)
+        self.decoded = bytearray()
         self.thresholds = [0x0400] * 0x1F38
     def renormalize(self):
         if self.scale < 0x01000000:
@@ -98,17 +97,16 @@ class UnpackerState():
 
     def get_referenced_byte(self):
         distance = self.distance_history.mru()
-        if distance > self.out_pos:
+        if distance > len(self.decoded):
             return 0
         else:
-            return self.decoded[self.out_pos - distance - 1]
+            return self.decoded[-distance-1]
 
     def copy_referenced_byte(self):
-        self.decoded[self.out_pos] = self.get_referenced_byte()
-        self.out_pos += 1
+        self.decoded.append(self.get_referenced_byte())
 
     def __str__(self):
-        attrs = ['scale', 'value', 'out_pos']
+        attrs = ['scale', 'value']
         return '\n'.join(['{0}: {1}'.format(i, hex(getattr(self, i)))
             for i in attrs])
 
@@ -119,23 +117,22 @@ def mischief_unpack(byte_input):
     state = UnpackerState(byte_input)
 
     # 00467FE1
-    while state.out_pos < state.out_length:
-        bytenr_in_dword = state.out_pos & 3
+    while len(state.decoded) < state.out_length:
+        bytenr_in_dword = len(state.decoded) & 3
         refined_state_nr = (state.state_nr << 4) + bytenr_in_dword
         # 0046801D
         if state.get_bit(refined_state_nr) == 0:
             single_byte_context = 0x736
             # 0046804A
-            if state.out_pos != 0:
-                single_byte_context += (state.decoded[state.out_pos - 1] >> (8 - 3)) * 0x300
+            if len(state.decoded) != 0:
+                single_byte_context += (state.decoded[-1] >> (8 - 3)) * 0x300
             # 0046808F
             if state.state_nr < 7:
                 next_byte = state.get_n_bits(8, single_byte_context)
             # 004680FB
             else:
                 next_byte = state.get_byte_with_reference(state.get_referenced_byte(), single_byte_context)
-            state.decoded[state.out_pos] = next_byte
-            state.out_pos += 1
+            state.decoded.append(next_byte)
             state.state_nr = next_state[state.state_nr]
             continue
         # 0046821C
@@ -145,8 +142,8 @@ def mischief_unpack(byte_input):
         # 00468241
         else:
             # 00468260
-            if state.out_pos == 0:
-                return -1
+            if len(state.decoded) == 0:
+                raise Exception("Error 1")
             # 00468294
             if state.get_bit(state.state_nr + 0xCC) == 0:
                 # 004682E3
@@ -220,17 +217,17 @@ def mischief_unpack(byte_input):
             # 004689FC
             state.distance_history.add_value(new_distance)
             # 00468A2B
-            if (new_distance < 0) or (state.out_pos <= 0):
-                return -3
+            if (new_distance < 0) or (len(state.decoded) == 0):
+                raise Exception("Error 3")
             # 00468A31
             state.state_nr = 0x7 if state.state_nr < 0x7 else 0xa
 
         requested_copy_len += 2
         # 00468A51
-        if state.out_length == state.out_pos:
-            return -4
+        if state.out_length == len(state.decoded):
+            raise Exception("Error 4")
         # 00468A5B
-        copy_count = min(state.out_length - state.out_pos, requested_copy_len)
+        copy_count = min(state.out_length - len(state.decoded), requested_copy_len)
         # 00468A8C
         for _ in xrange(copy_count):
             state.copy_referenced_byte()
