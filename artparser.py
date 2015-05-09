@@ -230,7 +230,7 @@ def mischief_unpack(byte_input):
                 new_distance = (new_distance_code & 1) | 2
                 additional_distance_bits = (new_distance_code >> 1) - 1
                 # 004687B3
-                if new_distance_code < 0x0e:
+                if additional_distance_bits < 6:
                     new_distance = new_distance << additional_distance_bits
                     # 004687CE
                     new_distance |= arith.get_n_bits_flipped(additional_distance_bits, new_distance - new_distance_code + 0x2AF)
