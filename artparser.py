@@ -32,16 +32,13 @@ class UnpackerState():
         (self.out_length,) = struct.unpack('I', byte_input[0:4])
         self.scale = 0xFFFFFFFF
         (self.value,) = struct.unpack('>I', byte_input[5:9])
-        self.in_pos = 9
-        self.in_length = len(byte_input)
-        self.input = byte_input + bytearray([0,0,0,0])
+        self.input = iter(byte_input[9:] + bytearray([0,0,0,0]))
         self.decoded = bytearray(self.out_length)
         self.thresholds = [0x0400] * 0x1F38
     def renormalize(self):
         if self.scale < 0x01000000:
             self.scale = ((self.scale << 8) & MAXINT)
-            self.value = ((self.value << 8) & MAXINT) | self.input[self.in_pos]
-            self.in_pos += 1
+            self.value = ((self.value << 8) & MAXINT) | self.input.next()
     def get_bit(self, contextidx):
         self.renormalize()
         threshold = self.thresholds[contextidx]
@@ -111,7 +108,7 @@ class UnpackerState():
         self.out_pos += 1
 
     def __str__(self):
-        attrs = ['scale', 'value', 'out_pos', 'in_pos']
+        attrs = ['scale', 'value', 'out_pos']
         return '\n'.join(['{0}: {1}'.format(i, hex(getattr(self, i)))
             for i in attrs])
 
@@ -122,7 +119,7 @@ def mischief_unpack(byte_input):
     state = UnpackerState(byte_input)
 
     # 00467FE1
-    while state.in_pos < state.in_length and state.out_pos < state.out_length:
+    while state.out_pos < state.out_length:
         bytenr_in_dword = state.out_pos & 3
         refined_state_nr = (state.state_nr << 4) + bytenr_in_dword
         # 0046801D
