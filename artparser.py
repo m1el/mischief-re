@@ -51,6 +51,18 @@ class MSBFirstGetter():
             value = (value << 1) + layer[value].get_bit()
         return value
 
+class LSBFirstGetter():
+    def __init__(self, decoder, bitcount):
+        self.layers = [[BitGetter(decoder) for _ in range(1<<layer)] for layer in range(bitcount)]
+
+    def get_value(self):
+        value = 0
+        bitnum = 0
+        for layer in self.layers:
+            value |= layer[value].get_bit() << bitnum
+            bitnum += 1
+        return value
+
 class ByteWithContextGetter():
     def __init__(self, decoder):
         self.layers = [[[BitGetter(decoder) for _ in range(1<<layer)] for _ in range(3)] for layer in range(8)]
@@ -82,21 +94,7 @@ class ArithDecoder():
         # 0..BF: decision literal/reference
         # C0/CC/D8/E4: (12 each) unary code (new distance/mru[0]/mru[1]/mru[2]/mru[3])
         # F0..1AF: decision: single-byte-copy shortcut on mru[0]
-        # 1B0..331: distance decoding
-        #   1B0:      unallocated
-        #   1B0..1EF: coarse distance info
-        #   2B0:      last bit for distance 4/5
-        #   2B1:      last bit for distance 6/7
-        #   2B2..2B4: last bits for distances 8..B
-        #   2B5..2B7: last bits for distances C..F
-        #   2B8..2BE: last bits for distances 10..17
-        #   2BF..2C5: last bits for distances 18..1F
-        #   2C6..2D4: last bits for distances 20..2F
-        #   2D5..2E3: last bits for distances 30..3F
-        #   2E4..302: last bits for distances 40..5F
-        #   303..321: last bits for distances 60..7F
-        #   322..331: last bits for distances >= 0x80
-        self.thresholds = [0x0400] * 0x332
+        self.thresholds = [0x0400] * 0x1B0
     def renormalize(self):
         if self.scale < 0x01000000:
             self.scale <<= 8
@@ -120,19 +118,6 @@ class ArithDecoder():
         else:
             self.thresholds[contextidx] = (threshold - ( threshold       >> 5)) + 0*0x40
         return bit
-
-    def get_n_bits(self, n, contextbase):
-        value = 0
-        for bitnum in range(n):
-            bit = self.get_bit(contextbase + (1 << bitnum) + value)
-            value = (value << 1) + bit
-        return value
-    def get_n_bits_flipped(self, n, contextbase):
-        flipped_value = 0
-        for bitnum in range(n):
-            bit = self.get_bit(contextbase + (1 << bitnum) + flipped_value)
-            flipped_value |= (bit << bitnum)
-        return flipped_value
 
     def get_raw_bit(self):
         self.renormalize()
@@ -220,6 +205,30 @@ class LengthGetter():
         (base, offset_getter) = self.ranges[subcontext][self.range_getter.get_value()]
         return base + offset_getter.get_value()
 
+class DistanceGetter():
+    def __init__(self, decoder):
+        self.decoder = decoder
+        self.coarse_distance_getter = [MSBFirstGetter(decoder, 6) for _ in range(4)]
+        self.medium_distance_getters = \
+            [[LSBFirstGetter(decoder, n) for _ in range(2)]
+                for n in range(1, 6)]
+        self.long_distance_low_bits_getter = LSBFirstGetter(decoder, 4)
+
+    def get_value(self, length_code):
+        coarse_distance = self.coarse_distance_getter[min(length_code, 3)].get_value()
+        if coarse_distance < 4:
+            return coarse_distance
+        else:
+            next_to_MSB = coarse_distance & 1
+            extra_bits_to_fetch = 1 + ((coarse_distance - 4) >> 1)
+            result_high = (2 | next_to_MSB) << extra_bits_to_fetch
+            if extra_bits_to_fetch < 6:
+                return result_high | self.medium_distance_getters[extra_bits_to_fetch-1][next_to_MSB].get_value()
+            else:
+                for bitnum in range(extra_bits_to_fetch - 1, 3, -1):
+                    result_high |= self.decoder.get_raw_bit() << bitnum
+                return result_high | self.long_distance_low_bits_getter.get_value()
+
 def mischief_unpack(byte_input):
     '''
     this function unpacks bytes and returns an unpacked byte array
@@ -230,6 +239,7 @@ def mischief_unpack(byte_input):
     state_nr = 0
     length_getters = [LengthGetter(arith), LengthGetter(arith)]
     literal_getters = [ByteWithContextGetter(arith) for _ in range(8)]
+    distance_getter = DistanceGetter(arith)
 
     # 00467FE1
     while not output.finished(out_length):
@@ -281,34 +291,7 @@ def mischief_unpack(byte_input):
         requested_copy_len = length_getters[fetch_new_distance].get_value(output.get_byte_in_dword())
         # 0046858A
         if fetch_new_distance:
-            # 004685AE-00468794 (unwound loop)
-            new_distance_code = arith.get_n_bits(6, (min(requested_copy_len,3) << 6) + 0x1B0)
-            # 00468794
-            if new_distance_code >= 4:
-                new_distance = (new_distance_code & 1) | 2
-                additional_distance_bits = (new_distance_code >> 1) - 1
-                # 004687B3
-                if additional_distance_bits < 6:
-                    new_distance = new_distance << additional_distance_bits
-                    # 004687CE
-                    new_distance |= arith.get_n_bits_flipped(additional_distance_bits, new_distance - new_distance_code + 0x2AF)
-                # 00468831
-                else:
-                    # 00468846
-                    for _ in range(additional_distance_bits - 4):
-                        new_distance = arith.get_raw_bit() + (new_distance * 2)
-                    # 0046886D-004689F6 (unwound loop)
-                    new_distance = new_distance << 4
-                    new_distance |= arith.get_n_bits_flipped(4, 0x322)
-                    # 004689F6
-                    if new_distance == -1:
-                        requested_copy_len += 0x112
-                        break
-            else:
-                new_distance = new_distance_code
-            # 004689FC
-            output.set_distance(new_distance)
-            # 00468A31
+            output.set_distance(distance_getter.get_value(requested_copy_len))
             state_nr = 0x7 if state_nr < 0x7 else 0xa
 
         output.copy_referenced_bytes(requested_copy_len + 2)
