@@ -16,6 +16,12 @@ class MRUList():
         (self.history[0], self.history[1:index+1]) = \
             (self.history[index], self.history[0:index])
 
+#class BitGetter():
+#    def __init__(self, decoder):
+#        self.decoder = decoder
+#        self.threshold = 0x400
+#    def get_bit(self):
+
 class ArithDecoder():
     def __init__(self, byte_input):
         self.scale = 0xFFFFFFFF
@@ -55,19 +61,26 @@ class ArithDecoder():
         if self.scale < 0x01000000:
             self.scale <<= 8
             self.value = (self.value << 8) | next(self.input)
-    def get_bit(self, contextidx):
+    def get_bit_(self, threshold):
         self.renormalize()
-        threshold = self.thresholds[contextidx]
         scaled_threshold = ((self.scale >> 0x0b) * threshold)
         if self.value < scaled_threshold:
-            self.thresholds[contextidx] = (threshold - ((threshold+0x1f) >> 5)) + 1*0x40
             self.scale = scaled_threshold
             return 0
         else:
-            self.thresholds[contextidx] = (threshold - ( threshold       >> 5)) + 0*0x40
             self.value -= scaled_threshold
             self.scale -= scaled_threshold
             return 1
+
+    def get_bit(self, contextidx):
+        threshold = self.thresholds[contextidx]
+        bit = self.get_bit_(threshold)
+        if bit == 0:
+            self.thresholds[contextidx] = (threshold - ((threshold+0x1f) >> 5)) + 1*0x40
+        else:
+            self.thresholds[contextidx] = (threshold - ( threshold       >> 5)) + 0*0x40
+        return bit
+
     def get_n_bits(self, n, contextbase):
         value = 0
         for bitnum in range(n):
