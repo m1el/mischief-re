@@ -15,6 +15,7 @@ class MRUList():
     def pick_recently_used(self, index):
         (self.history[0], self.history[1:index+1]) = \
             (self.history[index], self.history[0:index])
+        return self.history[0]
 
 class BitGetter():
     def __init__(self, decoder):
@@ -116,49 +117,34 @@ class ArithDecoder():
 
 class LZ77Output():
     def __init__(self):
-        self.distance_history = MRUList()
         self.decoded = bytearray()
 
     # LZ77 literal code
     def literal_byte(self, byte):
         self.decoded.append(byte)
 
-    # LZ77 distance management
-    def set_distance(self, distance):
-        self.distance_history.add_value(distance)
-
-    def recall_distance(self, index):
-        self.distance_history.pick_recently_used(index)
-
     # LZ77 distance use/copying
-    def get_referenced_byte(self):
-        distance = self.distance_history.mru()
+    def copy_bytes(self, distance, count):
+        for _ in range(count):
+            self.decoded.append(self.get_earlier_byte(distance))
+
+    # buffer inspection
+    def get_earlier_byte(self, distance):
         if distance >= len(self.decoded):
             return 0
         else:
             return self.decoded[-distance-1]
 
-    def copy_referenced_bytes(self, count):
-        for _ in range(count):
-            self.decoded.append(self.get_referenced_byte())
-
-    # buffer inspection
     def get_byte_in_dword(self):
         return len(self.decoded) & 3
-
-    def get_last_byte(self):
-        if len(self.decoded) == 0:
-            return 0
-        else:
-            return self.decoded[-1]
 
     def get_data(self):
         return self.decoded
 
-    def finished(self, expected_length):
+    def get_length(self):
+        return len(self.decoded)
         if len(self.decoded) > expected_length:
             raise Exception("Unpacking generated excess data")
-        return len(self.decoded) == expected_length
 
 class LengthGetter():
     def __init__(self, decoder):
@@ -219,6 +205,8 @@ def mischief_unpack(byte_input):
     reused_distance_length_getter = LengthGetter(decoder)
     distance_getter = DistanceGetter(decoder)
 
+    distance_history = MRUList()
+
     base_state = State(decoder)
     intermediate_after_new_distance = State(decoder, State(decoder, base_state))
     intermediate_after_reused_distance = State(decoder, State(decoder, base_state))
@@ -233,35 +221,38 @@ def mischief_unpack(byte_input):
                                  common_after_reuse_or_trivial_after_ref]
 
     last_was_reference = False
+    copy_mismatch_byte = None
     state = base_state
 
-    while not output.finished(out_length):
+    while output.get_length() < out_length:
         if state.is_reference_code[output.get_byte_in_dword()].get_bit() == 0:
             # LZ77 literal: add a single (new) byte to the output
-            if last_was_reference:
-                ref_byte = output.get_referenced_byte()
-            else:
-                ref_byte = None
-            output.literal_byte(literal_getters[output.get_last_byte() >> 5].get_value(ref_byte))
+            literal_getter = literal_getters[output.get_earlier_byte(0) >> 5]
+            output.literal_byte(literal_getter.get_value(copy_mismatch_byte))
             state = state.after_literal
+            copy_mismatch_byte = None
             last_was_reference = False
         else:
             # LZ77 reference: copy a part of previous output
             reference_kind = state.get_reference_kind.get_value()
             if reference_kind == 0:
                 copy_len = new_distance_length_getter.get_value(output.get_byte_in_dword()) + 2
-                output.set_distance(distance_getter.get_value(copy_len - 2))
+                distance = distance_getter.get_value(copy_len - 2)
+                distance_history.add_value(distance)
                 state = states_after_new_distance[last_was_reference]
             elif reference_kind == 1 and \
                  not state.get_kind_1_nontrivial[output.get_byte_in_dword()].get_bit():
                 copy_len = 1
-                # reuse previous distance
+                distance = distance_history.mru()
                 state = states_after_trivial_copy[last_was_reference]
             else:
                 copy_len = reused_distance_length_getter.get_value(output.get_byte_in_dword()) + 2
-                output.recall_distance(reference_kind - 1)
+                distance = distance_history.pick_recently_used(reference_kind - 1)
                 state = states_after_reused_distance[last_was_reference]
-            output.copy_referenced_bytes(copy_len)
+            if output.get_length() + copy_len > out_length:
+                raise Exception("Unpacking generates excess data")
+            output.copy_bytes(distance, copy_len)
+            copy_mismatch_byte = output.get_earlier_byte(distance) # first non-copied byte
             last_was_reference = True
 
     return output.get_data()
