@@ -2,14 +2,18 @@ import struct
 import sys
 
 class MRUList():
-    def __init__(self):
-        self.history = [0,0,0,0]
+    '''
+    Stores the most recently used values for some quantity, and
+    allows recalling recently used values by index.
+    '''
+    def __init__(self, len):
+        self.history = [0] * len
 
     def mru(self):
         return self.history[0]
 
     def add_value(self, new_val):
-        self.history[1:4] = self.history[0:3]
+        self.history[1:] = self.history[0:-1]
         self.history[0] = new_val
 
     def pick_recently_used(self, index):
@@ -205,7 +209,7 @@ def mischief_unpack(byte_input):
     reused_distance_length_getter = LengthGetter(decoder)
     distance_getter = DistanceGetter(decoder)
 
-    distance_history = MRUList()
+    distance_history = MRUList(4)
 
     base_state = State(decoder)
     intermediate_after_new_distance = State(decoder, State(decoder, base_state))
