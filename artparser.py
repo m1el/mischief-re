@@ -51,6 +51,28 @@ class MSBFirstGetter():
             value = (value << 1) + layer[value].get_bit()
         return value
 
+class ByteWithContextGetter():
+    def __init__(self, decoder):
+        self.layers = [[[BitGetter(decoder) for _ in range(1<<layer)] for _ in range(3)] for layer in range(8)]
+
+    def get_value(self, context_byte):
+        use_context = context_byte != None
+        value = 0
+        for bitnr in range(8):
+            if use_context:
+                refbit = ((context_byte << bitnr) & 0x80) != 0
+                if refbit == 0:
+                    way = 1
+                else:
+                    way = 2
+            else:
+                way = 0
+            bit = self.layers[bitnr][way][value].get_bit()
+            value = value * 2 + bit
+            if use_context and bit != refbit:
+                use_context = False
+        return value
+
 class ArithDecoder():
     def __init__(self, byte_input):
         self.scale = 0xFFFFFFFF
@@ -74,18 +96,7 @@ class ArithDecoder():
         #   2E4..302: last bits for distances 40..5F
         #   303..321: last bits for distances 60..7F
         #   322..331: last bits for distances >= 0x80
-        # 332..735: length decoding
-        #   332..533: length context collection (new distance)
-        #     332/333:   unary coded length range (0..7/8..F/10..10F)
-        #     334..373:  4 collections for length 0..7 (first entry in each collection unallocated)
-        #     374..3B3:  unallocated
-        #     3B4..3F3:  4 collections for length 8..F (first entry in each collection unallocated)
-        #     3F4..433:  unallocated
-        #     434..533:  length 10..10F (first entry unallocated)
-        #   534: length context collection (known distance)
-        #     details like 332..533
-        # 736..1F35: literal contexts (8 areas of 3 areas of 0x100 contexts)
-        self.thresholds = [0x0400] * 0x1F36
+        self.thresholds = [0x0400] * 0x332
     def renormalize(self):
         if self.scale < 0x01000000:
             self.scale <<= 8
@@ -122,25 +133,6 @@ class ArithDecoder():
             bit = self.get_bit(contextbase + (1 << bitnum) + flipped_value)
             flipped_value |= (bit << bitnum)
         return flipped_value
-    def get_byte_with_reference(self, refbyte, contextbase):
-        mismatch_found = False
-        value = 0
-        # 00468127
-        for bitnr in range(8):
-            ctxoffset = (1 << bitnr)
-            if mismatch_found:
-                ctxoffset += 0
-            else:
-                refbit = ((refbyte << bitnr) & 0x80) != 0
-                if refbit == 0:
-                    ctxoffset += 0x100
-                else:
-                    ctxoffset += 0x200
-            bit = self.get_bit(contextbase + ctxoffset + value)
-            value = value * 2 + bit
-            if bit != refbit:
-                mismatch_found = True
-        return value
 
     def get_raw_bit(self):
         self.renormalize()
@@ -237,19 +229,19 @@ def mischief_unpack(byte_input):
     output = LZ77Output()
     state_nr = 0
     length_getters = [LengthGetter(arith), LengthGetter(arith)]
+    literal_getters = [ByteWithContextGetter(arith) for _ in range(8)]
 
     # 00467FE1
     while not output.finished(out_length):
         refined_state_nr = (state_nr << 4) + output.get_byte_in_dword()
         # 0046801D
         if arith.get_bit(refined_state_nr) == 0:
-            single_byte_context = 0x736 + (output.get_last_byte() >> 5) * 0x300
             if state_nr < 7:
-                next_byte = arith.get_n_bits(8, single_byte_context)
+                ref_byte = None
             # 004680FB
             else:
-                next_byte = arith.get_byte_with_reference(output.get_referenced_byte(), single_byte_context)
-            output.literal_byte(next_byte)
+                ref_byte = output.get_referenced_byte()
+            output.literal_byte(literal_getters[output.get_last_byte() >> 5].get_value(ref_byte))
             state_nr = next_state[state_nr]
             continue
         # 0046821C
