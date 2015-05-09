@@ -103,8 +103,9 @@ def mischief_unpack(byte_input):
     # 00467FE1
     while state.in_pos < state.in_length and state.out_pos < state.out_length:
         bytenr_in_dword = state.out_pos & 3
+        refined_state_nr = (state.state_nr << 4) + bytenr_in_dword
         # 0046801D
-        if state.get_bit((state.out_pos & 3) + (state.state_nr << 4)) == 0:
+        if state.get_bit(refined_state_nr) == 0:
             single_byte_context = 0x736
             # 0046804A
             if state.out_pos != 0:
@@ -132,7 +133,7 @@ def mischief_unpack(byte_input):
             # 00468294
             if state.get_bit(state.state_nr + 0xCC) == 0:
                 # 004682E3
-                if state.get_bit((state.state_nr << 4) + bytenr_in_dword + 0xF0) == 0:
+                if state.get_bit(refined_state_nr + 0xF0) == 0:
                     # 00468309
                     state.decoded[state.out_pos] = state.decoded[(state.out_pos - distance) % state.out_length]
                     state.out_pos += 1
