@@ -1,21 +1,6 @@
 import struct
 import sys
 
-# State transitions:
-#  0: "stable" state
-
-#  1..6: intermediate states
-
-#  7 -> 4 -> 1 -> 0
-#  8 -> 5 -> 2 -> 0
-#  9 -> 6 -> 3 -> 0
-
-#  A -> 4 -> 1 -> 0
-#  B -> 5 -> 2 -> 0
-next_state = [0, 0, 0, 0, 1, 2, 3, 4, 5, 6, 4, 5]
-
-MAXINT = 0xFFFFFFFF
-
 class MRUList():
     def __init__(self):
         self.history = [0,0,0,0]
@@ -39,12 +24,12 @@ class ArithDecoder():
         self.thresholds = [0x0400] * 0x1F38
     def renormalize(self):
         if self.scale < 0x01000000:
-            self.scale = ((self.scale << 8) & MAXINT)
-            self.value = ((self.value << 8) & MAXINT) | self.input.next()
+            self.scale <<= 8
+            self.value = (self.value << 8) | self.input.next()
     def get_bit(self, contextidx):
         self.renormalize()
         threshold = self.thresholds[contextidx]
-        scaled_threshold = ((self.scale >> 0x0b) * threshold) & MAXINT
+        scaled_threshold = ((self.scale >> 0x0b) * threshold)
         if self.value < scaled_threshold:
             self.thresholds[contextidx] = (threshold - ((threshold+0x1f) >> 5)) + 1*0x40
             self.scale = scaled_threshold
@@ -147,6 +132,19 @@ class LZ77Output():
 
     def is_empty(self):
         return len(self.decoded) == 0
+
+# State transitions:
+#  0: "stable" state
+
+#  1..6: intermediate states
+
+#  7 -> 4 -> 1 -> 0
+#  8 -> 5 -> 2 -> 0
+#  9 -> 6 -> 3 -> 0
+
+#  A -> 4 -> 1 -> 0
+#  B -> 5 -> 2 -> 0
+next_state = [0, 0, 0, 0, 1, 2, 3, 4, 5, 6, 4, 5]
 
 def mischief_unpack(byte_input):
     '''
