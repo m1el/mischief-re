@@ -146,8 +146,8 @@ def mischief_unpack(byte_input):
             state.sp_18 = TABLE_50B8D8[state.sp_18]
             continue
         # 0046821C
-        if state.get_bit(state.sp_18 + 0xC0) == 0:
-            state.sp_18 += 0x0c
+        fetch_new_distance = state.get_bit(state.sp_18 + 0xC0) == 0
+        if fetch_new_distance:
             len_context = 0x332
         # 00468241
         else:
@@ -203,7 +203,7 @@ def mischief_unpack(byte_input):
                 len_bits = 8
         requested_copy_len = len_base + state.get_n_bits(len_bits, len_context)
         # 0046858A
-        if state.sp_18 >= 0x0c:
+        if fetch_new_distance:
             # 004685AE-00468794 (unwound loop)
             new_distance_code = state.get_n_bits(6, (min(requested_copy_len,3) << 6) + 0x1B0)
             # 00468794
@@ -228,7 +228,6 @@ def mischief_unpack(byte_input):
                     # 004689F6
                     if new_distance == -1:
                         requested_copy_len += 0x112
-                        state.sp_18 -= 0x0c
                         break
             else:
                 new_distance = new_distance_code
@@ -240,7 +239,7 @@ def mischief_unpack(byte_input):
             if (distance < 0) or (state.out_pos <= 0):
                 return -3
             # 00468A31
-            state.sp_18 = 0x7 if state.sp_18 < 0x13 else 0xa
+            state.sp_18 = 0x7 if state.sp_18 < 0x7 else 0xa
 
         requested_copy_len += 2
         # 00468A51
