@@ -21,6 +21,35 @@ class MRUList():
             (self.history[index], self.history[0:index])
         return self.history[0]
 
+class ArithDecoder():
+    def __init__(self, byte_input):
+        self.scale = 0xFFFFFFFF
+        (self.value,) = struct.unpack('>I', byte_input[0:4])
+        self.input = iter(byte_input[4:] + bytearray([0,0,0,0]))
+    def renormalize(self):
+        if self.scale < 0x01000000:
+            self.scale <<= 8
+            self.value = (self.value << 8) | next(self.input)
+    def get_bit_(self, threshold):
+        self.renormalize()
+        scaled_threshold = ((self.scale >> 0x0b) * threshold)
+        if self.value < scaled_threshold:
+            self.scale = scaled_threshold
+            return 0
+        else:
+            self.value -= scaled_threshold
+            self.scale -= scaled_threshold
+            return 1
+
+    def get_raw_bit(self):
+        self.renormalize()
+        self.scale >>= 1
+        if self.value < self.scale:
+            return 0
+        else:
+            self.value -= self.scale
+            return 1
+
 class BitGetter():
     def __init__(self, decoder):
         self.decoder = decoder
@@ -68,57 +97,6 @@ class LSBFirstGetter():
             bitnum += 1
         return value
 
-class ByteWithContextGetter():
-    def __init__(self, decoder):
-        self.layers = [[[BitGetter(decoder) for _ in range(1<<layer)] for _ in range(3)] for layer in range(8)]
-
-    def get_value(self, context_byte):
-        use_context = context_byte != None
-        value = 0
-        for bitnr in range(8):
-            if use_context:
-                refbit = ((context_byte << bitnr) & 0x80) != 0
-                if refbit == 0:
-                    way = 1
-                else:
-                    way = 2
-            else:
-                way = 0
-            bit = self.layers[bitnr][way][value].get_bit()
-            value = value * 2 + bit
-            if use_context and bit != refbit:
-                use_context = False
-        return value
-
-class ArithDecoder():
-    def __init__(self, byte_input):
-        self.scale = 0xFFFFFFFF
-        (self.value,) = struct.unpack('>I', byte_input[0:4])
-        self.input = iter(byte_input[4:] + bytearray([0,0,0,0]))
-    def renormalize(self):
-        if self.scale < 0x01000000:
-            self.scale <<= 8
-            self.value = (self.value << 8) | next(self.input)
-    def get_bit_(self, threshold):
-        self.renormalize()
-        scaled_threshold = ((self.scale >> 0x0b) * threshold)
-        if self.value < scaled_threshold:
-            self.scale = scaled_threshold
-            return 0
-        else:
-            self.value -= scaled_threshold
-            self.scale -= scaled_threshold
-            return 1
-
-    def get_raw_bit(self):
-        self.renormalize()
-        self.scale >>= 1
-        if self.value < self.scale:
-            return 0
-        else:
-            self.value -= self.scale
-            return 1
-
 class LZ77Output():
     def __init__(self):
         self.decoded = bytearray()
@@ -149,6 +127,28 @@ class LZ77Output():
         return len(self.decoded)
         if len(self.decoded) > expected_length:
             raise Exception("Unpacking generated excess data")
+
+class LiteralGetter():
+    def __init__(self, decoder):
+        self.layers = [[[BitGetter(decoder) for _ in range(1<<layer)] for _ in range(3)] for layer in range(8)]
+
+    def get_value(self, context_byte):
+        use_context = context_byte != None
+        value = 0
+        for bitnr in range(8):
+            if use_context:
+                refbit = ((context_byte << bitnr) & 0x80) != 0
+                if refbit == 0:
+                    way = 1
+                else:
+                    way = 2
+            else:
+                way = 0
+            bit = self.layers[bitnr][way][value].get_bit()
+            value = value * 2 + bit
+            if use_context and bit != refbit:
+                use_context = False
+        return value
 
 class LengthGetter():
     def __init__(self, decoder):
@@ -204,7 +204,7 @@ def mischief_unpack(byte_input):
     output = LZ77Output()
 
     # literal_getters is indexed by the top 3 bits of the previous byte
-    literal_getters = [ByteWithContextGetter(decoder) for _ in range(8)]
+    literal_getters = [LiteralGetter(decoder) for _ in range(8)]
     new_distance_length_getter = LengthGetter(decoder)
     reused_distance_length_getter = LengthGetter(decoder)
     distance_getter = DistanceGetter(decoder)
