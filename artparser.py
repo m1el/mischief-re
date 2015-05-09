@@ -24,15 +24,11 @@ class MRUList():
         (self.history[0], self.history[1:index+1]) = \
             (self.history[index], self.history[0:index])
 
-class UnpackerState():
+class ArithDecoder():
     def __init__(self, byte_input):
-        self.state_nr = 0
-        self.distance_history = MRUList()
-        (self.out_length,) = struct.unpack('I', byte_input[0:4])
         self.scale = 0xFFFFFFFF
-        (self.value,) = struct.unpack('>I', byte_input[5:9])
-        self.input = iter(byte_input[9:] + bytearray([0,0,0,0]))
-        self.decoded = bytearray()
+        (self.value,) = struct.unpack('>I', byte_input[0:4])
+        self.input = iter(byte_input[4:] + bytearray([0,0,0,0]))
         self.thresholds = [0x0400] * 0x1F38
     def renormalize(self):
         if self.scale < 0x01000000:
@@ -85,7 +81,6 @@ class UnpackerState():
                 mismatch_found = True
         return value
 
-
     def get_raw_bit(self):
         self.renormalize()
         self.scale >>= 1
@@ -94,6 +89,30 @@ class UnpackerState():
         else:
             self.value -= self.scale
             return 1
+        
+
+class UnpackerState():
+    def __init__(self, byte_input):
+        self.state_nr = 0
+        self.distance_history = MRUList()
+        (self.out_length,) = struct.unpack('I', byte_input[0:4])
+        self.arith = ArithDecoder(byte_input[5:])
+        self.decoded = bytearray()
+
+    def get_bit(self, contextidx):
+        return self.arith.get_bit(contextidx)
+
+    def get_n_bits(self, n, contextbase):
+        return self.arith.get_n_bits(n, contextbase)
+
+    def get_n_bits_flipped(self, n, contextbase):
+        return self.arith.get_n_bits_flipped(n, contextbase)
+
+    def get_byte_with_reference(self, refbyte, contextbase):
+        return self.arith.get_byte_with_reference(refbyte, contextbase)
+
+    def get_raw_bit(self):
+        return self.arith.get_raw_bit()
 
     def get_referenced_byte(self):
         distance = self.distance_history.mru()
