@@ -100,7 +100,11 @@ class UnpackerState():
             return 1
 
     def get_referenced_byte(self):
-        return self.decoded[(self.out_pos - self.distance_history.mru() - 1) % self.out_length]
+        distance = self.distance_history.mru()
+        if distance > self.out_pos:
+            return 0
+        else:
+            return self.decoded[self.out_pos - distance - 1]
 
     def copy_referenced_byte(self):
         self.decoded[self.out_pos] = self.get_referenced_byte()
