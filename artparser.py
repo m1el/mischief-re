@@ -9,14 +9,27 @@ next_state = [
 
 MAXINT = 0xFFFFFFFF
 
+class MoveToFrontDecoder():
+    def __init__(self):
+        self.history = [0,0,0,0]
+
+    def head(self):
+        return self.history[0]
+
+    def add_value(self, new_val):
+        self.history[1:4] = self.history[0:3]
+        self.history[0] = new_val
+
+    def move_to_front(self, index):
+        (self.history[0], self.history[1:index+1]) = \
+            (self.history[index], self.history[0:index])
+        return self.head()
+
 class UnpackerState():
     def __init__(self, byte_input):
         self.state_nr = 0
         self.out_pos = 0 # sp_1c
-        self.sp_2c = 0
-        self.sp_28 = 0
-        # self.garbage_p = 0 # sp_3c
-        self.sp_40 = 0
+        self.distance_history = MoveToFrontDecoder()
         (self.out_length,) = struct.unpack('I', byte_input[0:4])
         self.scale = 0xFFFFFFFF
         (self.value,) = struct.unpack('>I', byte_input[5:9])
@@ -98,7 +111,6 @@ def mischief_unpack(byte_input):
     this function unpacks bytes and returns an unpacked byte array
     '''
     state = UnpackerState(byte_input)
-    distance = 0
 
     # 00467FE1
     while state.in_pos < state.in_length and state.out_pos < state.out_length:
@@ -115,7 +127,7 @@ def mischief_unpack(byte_input):
                 next_byte = state.get_n_bits(8, single_byte_context)
             # 004680FB
             else:
-                ref_byte = state.decoded[(state.out_pos - distance - 1) % state.out_length]
+                ref_byte = state.decoded[(state.out_pos - state.distance_history.head() - 1) % state.out_length]
                 next_byte = state.get_byte_with_reference(ref_byte, single_byte_context)
             state.decoded[state.out_pos] = next_byte
             state.out_pos += 1
@@ -135,7 +147,7 @@ def mischief_unpack(byte_input):
                 # 004682E3
                 if state.get_bit(refined_state_nr + 0xF0) == 0:
                     # 00468309
-                    state.decoded[state.out_pos] = state.decoded[(state.out_pos - distance - 1) % state.out_length]
+                    state.decoded[state.out_pos] = state.decoded[(state.out_pos - state.distance_history.head() - 1) % state.out_length]
                     state.out_pos += 1
                     # 00468322
                     state.state_nr = 0x9 if state.state_nr < 7 else 0xB
@@ -144,19 +156,15 @@ def mischief_unpack(byte_input):
             else:
                 # 00468389
                 if state.get_bit(state.state_nr+0xD8) == 0:
-                    new_distance = state.sp_28
+                    state.distance_history.move_to_front(1)
                 # 004683A5
                 else:
                     # 004683E1
                     if state.get_bit(state.state_nr+0xE4) == 0:
-                        new_distance = state.sp_2c
+                        state.distance_history.move_to_front(2)
                     # 00468402
                     else:
-                        new_distance = state.sp_40
-                        state.sp_40 = state.sp_2c
-                    state.sp_2c = state.sp_28
-                state.sp_28 = distance
-                distance = new_distance
+                        state.distance_history.move_to_front(3)
             # 00468437
             state.state_nr = 8 if state.state_nr < 7 else 0xb
             len_context = 0x534
@@ -206,11 +214,9 @@ def mischief_unpack(byte_input):
             else:
                 new_distance = new_distance_code
             # 004689FC
-            state.sp_40 = state.sp_2c
-            (state.sp_28, state.sp_2c) = (distance, state.sp_28)
-            distance = new_distance
+            state.distance_history.add_value(new_distance)
             # 00468A2B
-            if (distance < 0) or (state.out_pos <= 0):
+            if (new_distance < 0) or (state.out_pos <= 0):
                 return -3
             # 00468A31
             state.state_nr = 0x7 if state.state_nr < 0x7 else 0xa
@@ -223,7 +229,7 @@ def mischief_unpack(byte_input):
         copy_count = min(state.out_length - state.out_pos, requested_copy_len)
         # 00468A8C
         for _ in xrange(copy_count):
-            state.decoded[state.out_pos] = state.decoded[(state.out_pos - distance - 1) % state.out_length]
+            state.decoded[state.out_pos] = state.decoded[(state.out_pos - state.distance_history.head() - 1) % state.out_length]
             state.out_pos += 1
     return state.decoded
 
