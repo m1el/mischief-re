@@ -1,11 +1,18 @@
 import struct
 import sys
 
-# byte table, probably for state machine
-next_state = [
-        0x00, 0x00, 0x00, 0x00, 0x01, 0x02, 0x03, 0x04,
-        0x05, 0x06, 0x04, 0x05, 0x07, 0x07, 0x07, 0x07,
-        0x07, 0x07, 0x07, 0x0A, 0x0A, 0x0A, 0x0A, 0x0A]
+# State transitions:
+#  0: "stable" state
+
+#  1..6: intermediate states
+
+#  7 -> 4 -> 1 -> 0
+#  8 -> 5 -> 2 -> 0
+#  9 -> 6 -> 3 -> 0
+
+#  A -> 4 -> 1 -> 0
+#  B -> 5 -> 2 -> 0
+next_state = [0, 0, 0, 0, 1, 2, 3, 4, 5, 6, 4, 5]
 
 MAXINT = 0xFFFFFFFF
 
