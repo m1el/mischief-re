@@ -122,11 +122,8 @@ def mischief_unpack(byte_input):
         refined_state_nr = (state.state_nr << 4) + bytenr_in_dword
         # 0046801D
         if state.get_bit(refined_state_nr) == 0:
-            single_byte_context = 0x736
-            # 0046804A
-            if len(state.decoded) != 0:
-                single_byte_context += (state.decoded[-1] >> (8 - 3)) * 0x300
-            # 0046808F
+            prev_byte = 0 if len(state.decoded) == 0 else state.decoded[-1]
+            single_byte_context = 0x736 + (prev_byte >> 5) * 0x300
             if state.state_nr < 7:
                 next_byte = state.get_n_bits(8, single_byte_context)
             # 004680FB
