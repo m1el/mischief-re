@@ -21,7 +21,36 @@ class ArithDecoder():
         self.scale = 0xFFFFFFFF
         (self.value,) = struct.unpack('>I', byte_input[0:4])
         self.input = iter(byte_input[4:] + bytearray([0,0,0,0]))
-        self.thresholds = [0x0400] * 0x1F38
+        # context allocation map:
+        # 0..BF: decision literal/reference
+        # C0/CC/D8/E4: (12 each) unary code (new distance/mru[0]/mru[1]/mru[2]/mru[3])
+        # F0..1AF: decision: single-byte-copy shortcut on mru[0]
+        # 1B0..331: distance decoding
+        #   1B0:      unallocated
+        #   1B0..1EF: coarse distance info
+        #   2B0:      last bit for distance 4/5
+        #   2B1:      last bit for distance 6/7
+        #   2B2..2B4: last bits for distances 8..B
+        #   2B5..2B7: last bits for distances C..F
+        #   2B8..2BE: last bits for distances 10..17
+        #   2BF..2C5: last bits for distances 18..1F
+        #   2C6..2D4: last bits for distances 20..2F
+        #   2D5..2E3: last bits for distances 30..3F
+        #   2E4..302: last bits for distances 40..5F
+        #   303..321: last bits for distances 60..7F
+        #   322..331: last bits for distances >= 0x80
+        # 332..735: length decoding
+        #   332..533: length context collection (new distance)
+        #     332/333:   unary coded length range (0..7/8..F/10..10F)
+        #     334..373:  4 collections for length 0..7 (first entry in each collection unallocated)
+        #     374..3B3:  unallocated
+        #     3B4..3F3:  4 collections for length 8..F (first entry in each collection unallocated)
+        #     3F4..433:  unallocated
+        #     434..533:  length 10..10F (first entry unallocated)
+        #   534: length context collection (known distance)
+        #     details like 332..533
+        # 736..1F35: literal contexts (8 areas of 3 areas of 0x100 contexts)
+        self.thresholds = [0x0400] * 0x1F36
     def renormalize(self):
         if self.scale < 0x01000000:
             self.scale <<= 8
