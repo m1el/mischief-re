@@ -102,15 +102,51 @@ class LZ77Output():
         self.distance_history = MRUList()
         self.decoded = bytearray()
 
+    # LZ77 literal code
+    def literal_byte(self, byte):
+        self.decoded.append(byte)
+
+    # LZ77 distance management
+    def set_distance(self, distance):
+        if (distance < 0) or self.is_empty():
+            raise Exception("Error 3")
+        self.distance_history.add_value(distance)
+
+    def recall_distance(self, index):
+        self.distance_history.pick_recently_used(index)
+
+    # LZ77 distance use/copying
     def get_referenced_byte(self):
         distance = self.distance_history.mru()
-        if distance > len(self.decoded):
+        if distance >= len(self.decoded):
             return 0
         else:
             return self.decoded[-distance-1]
 
-    def copy_referenced_byte(self):
-        self.decoded.append(self.get_referenced_byte())
+    def copy_referenced_bytes(self, count):
+        for _ in range(count):
+            self.decoded.append(self.get_referenced_byte())
+
+    # buffer inspection
+    def get_byte_in_dword(self):
+        return len(self.decoded) & 3
+
+    def get_last_byte(self):
+        if self.is_empty():
+            return 0
+        else:
+            return self.decoded[-1]
+
+    def get_data(self):
+        return self.decoded
+
+    def finished(self, expected_length):
+        if len(self.decoded) > expected_length:
+            raise Exception("Error 4")
+        return len(self.decoded) == expected_length
+
+    def is_empty(self):
+        return len(self.decoded) == 0
 
 def mischief_unpack(byte_input):
     '''
@@ -122,19 +158,18 @@ def mischief_unpack(byte_input):
     state_nr = 0
 
     # 00467FE1
-    while len(output.decoded) < out_length:
-        bytenr_in_dword = len(output.decoded) & 3
-        refined_state_nr = (state_nr << 4) + bytenr_in_dword
+    while not output.finished(out_length):
+        output.get_byte_in_dword()
+        refined_state_nr = (state_nr << 4) + output.get_byte_in_dword()
         # 0046801D
         if arith.get_bit(refined_state_nr) == 0:
-            prev_byte = 0 if len(output.decoded) == 0 else output.decoded[-1]
-            single_byte_context = 0x736 + (prev_byte >> 5) * 0x300
+            single_byte_context = 0x736 + (output.get_last_byte() >> 5) * 0x300
             if state_nr < 7:
                 next_byte = arith.get_n_bits(8, single_byte_context)
             # 004680FB
             else:
                 next_byte = arith.get_byte_with_reference(output.get_referenced_byte(), single_byte_context)
-            output.decoded.append(next_byte)
+            output.literal_byte(next_byte)
             state_nr = next_state[state_nr]
             continue
         # 0046821C
@@ -144,14 +179,14 @@ def mischief_unpack(byte_input):
         # 00468241
         else:
             # 00468260
-            if len(output.decoded) == 0:
+            if output.is_empty():
                 raise Exception("Error 1")
             # 00468294
             if arith.get_bit(state_nr + 0xCC) == 0:
                 # 004682E3
                 if arith.get_bit(refined_state_nr + 0xF0) == 0:
                     # 00468309
-                    output.copy_referenced_byte()
+                    output.copy_referenced_bytes(1)
                     # 00468322
                     state_nr = 0x9 if state_nr < 7 else 0xB
                     continue
@@ -159,28 +194,28 @@ def mischief_unpack(byte_input):
             else:
                 # 00468389
                 if arith.get_bit(state_nr+0xD8) == 0:
-                    output.distance_history.pick_recently_used(1)
+                    output.recall_distance(1)
                 # 004683A5
                 else:
                     # 004683E1
                     if arith.get_bit(state_nr+0xE4) == 0:
-                        output.distance_history.pick_recently_used(2)
+                        output.recall_distance(2)
                     # 00468402
                     else:
-                        output.distance_history.pick_recently_used(3)
+                        output.recall_distance(3)
             # 00468437
             state_nr = 8 if state_nr < 7 else 0xb
             len_context = 0x534
         # 0046846B
         if arith.get_bit(len_context) == 0:
-            len_context += bytenr_in_dword * 8 + 2
+            len_context += output.get_byte_in_dword() * 8 + 2
             len_base = 0
             len_bits = 3
         # 00468497
         else:
             # 004684CF
             if arith.get_bit(len_context + 1) == 0:
-                len_context += bytenr_in_dword * 8 + 0x82
+                len_context += output.get_byte_in_dword() * 8 + 0x82
                 len_base = 8
                 len_bits = 3
             # 004684F9
@@ -217,23 +252,12 @@ def mischief_unpack(byte_input):
             else:
                 new_distance = new_distance_code
             # 004689FC
-            output.distance_history.add_value(new_distance)
-            # 00468A2B
-            if (new_distance < 0) or (len(output.decoded) == 0):
-                raise Exception("Error 3")
+            output.set_distance(new_distance)
             # 00468A31
             state_nr = 0x7 if state_nr < 0x7 else 0xa
 
-        requested_copy_len += 2
-        # 00468A51
-        if out_length == len(output.decoded):
-            raise Exception("Error 4")
-        # 00468A5B
-        copy_count = min(out_length - len(output.decoded), requested_copy_len)
-        # 00468A8C
-        for _ in xrange(copy_count):
-            output.copy_referenced_byte()
-    return output.decoded
+        output.copy_referenced_bytes(requested_copy_len + 2)
+    return output.get_data()
 
 
 ART_MAGICS = set([b'\xc5\xb3\x8b\xe9', b'\xc5\xb3\x8b\xe7'])
