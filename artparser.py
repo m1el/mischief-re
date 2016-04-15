@@ -613,7 +613,7 @@ def read_action(data, pos):
             dx = tmp & 0x3fff
             if tmp & (1<<14): dx = -dx
             dy = (tmp >> 15) & 0x3fff
-            if tmp & (tmp << 29): dy = -dy
+            if tmp & (1<<29): dy = -dy
             p = (tmp >> 30) | (byt << 2)
             x += dx/32.
             y += dy/32.
