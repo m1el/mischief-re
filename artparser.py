@@ -591,6 +591,7 @@ def read_image(data, pos):
 
 def read_action(data, pos):
     val = {}
+    start = pos
     (val['layer'], pos) = read_int(data, pos)
     (val['action_id'], pos) = read_int(data, pos)
 
@@ -681,10 +682,15 @@ def read_action(data, pos):
         (val['src_size'], pos) = read_int_array(data, pos, 2)
         (val['image_id'], pos) = read_int(data, pos)
 
+    elif val['action_id'] == 0x05:
+        val['action_name'] = 'unknown_05'
+        (val['data'], pos) = data[pos:pos+0x14], pos + 0x14
+
     else:
         import binascii
         print('unknown action: %x' % val['action_id'])
-        print(binascii.hexlify(data[pos:pos+200]))
+        print(start)
+        print(binascii.hexlify(data[start:start+200]))
         die()
 
     return (val, pos)
@@ -716,20 +722,49 @@ class ArtParser(object):
     images = None
     actions = None
     unknown_eof = None
+    pins = None
 
     def __init__(self, fname):
         with open(fname, 'rb') as fd:
-            header = fd.read(0x28)
-            if len(header) < 0x28:
+            magic = fd.read(0x08)
+            if len(magic) < 0x08:
                 raise Exception('file is too small to be an .art file')
-            if header[0:4] not in ART_MAGICS:
+            if magic[0:4] not in ART_MAGICS:
                 raise Exception('bad file magic')
+            (ver,) = struct.unpack('I', magic[4:8])
 
-            (self.raw_size,) = struct.unpack('I', header[0x24:0x28])
+            if ver & 0xFF == 00:
+              header = fd.read(0x08)
+              if len(header) < 0x08:
+                raise Exception('file is too small to be an .art file')
+            elif ver == 0x81:
+              header = fd.read(0x1C)
+              if len(header) < 0x1C:
+                raise Exception('file is too small to be an .art file')
+            elif ver == 0x82:
+              header = fd.read(0x21)
+              if len(header) < 0x21:
+                raise Exception('file is too small to be an .art file')
+              self.read_pins(fd)
+            else:
+              raise Exception('unknown art file version: %d' % ver)
+
+            (self.raw_size,) = struct.unpack('I', fd.read(4))
             self.data = fd.read(self.raw_size)
             self.data = mischief_unpack(self.data)
             self.parse_unpacked()
 
+
+    def read_pins(self, fd):
+      self.pins = []
+      num, = struct.unpack('I', fd.read(4))
+      for _ in range(num):
+        pin = {}
+        data = fd.read(0x44)
+        pin['matrix'], pos = read_float_matrix(data, 0, 4, 4)
+        name_len, pos = read_int(data, pos)
+        pin['name'] = fd.read(name_len).strip(b'\x00').decode()
+        self.pins.append(pin)
 
     def parse_unpacked(self):
         pos = 0
@@ -783,18 +818,18 @@ def main(argv):
         return 1
 
     art = ArtParser(argv[1])
-    # output = getattr(sys.stdout, 'buffer', sys.stdout)
-    # output.write(art.data)
     print('pen info:')
     pprint(art.pen_info)
     print('view matrix:')
     pprint(art.view_matrix)
     print('layer order:')
     pprint(art.layer_order)
+    print('pins:')
+    pprint(art.pins)
     print('layer info:')
     pprint(art.layers)
-    # print('images:')
-    # pprint(art.images)
+    #print('images:')
+    #pprint(art.images)
     print('actions:')
     pprint(art.actions)
 
