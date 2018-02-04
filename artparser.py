@@ -1,510 +1,381 @@
 import struct
 import sys
 
-# byte table, probably for state machine
-TABLE_50B8D8 = [
-        0x00, 0x00, 0x00, 0x00, 0x01, 0x02, 0x03, 0x04,
-        0x05, 0x06, 0x04, 0x05, 0x07, 0x07, 0x07, 0x07,
-        0x07, 0x07, 0x07, 0x0A, 0x0A, 0x0A, 0x0A, 0x0A,
-        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-        0x01, 0x00, 0x00, 0x00, 0x02, 0x00, 0x00, 0x00,
-        0x03, 0x00, 0x00, 0x00, 0x04, 0x00, 0x00, 0x00,
-        0x05, 0x00, 0x00, 0x00, 0x06, 0x00, 0x00, 0x00,
-        0x04, 0x00, 0x00, 0x00, 0x05, 0x00, 0x00, 0x00,
-        0x07, 0x00, 0x00, 0x00, 0x07, 0x00, 0x00, 0x00,
-        0x07, 0x00, 0x00, 0x00, 0x07, 0x00, 0x00, 0x00,
-        0x07, 0x00, 0x00, 0x00, 0x07, 0x00, 0x00, 0x00,
-        0x07, 0x00, 0x00, 0x00, 0x0A, 0x00, 0x00, 0x00,
-        0x0A, 0x00, 0x00, 0x00, 0x0A, 0x00, 0x00, 0x00,
-        0x0A, 0x00, 0x00, 0x00, 0x0A, 0x00, 0x00, 0x00,
-        0x08, 0x00, 0x00, 0x00, 0x08, 0x00, 0x00, 0x00,
-        0x08, 0x00, 0x00, 0x00, 0x08, 0x00, 0x00, 0x00,
-        0x08, 0x00, 0x00, 0x00, 0x08, 0x00, 0x00, 0x00,
-        0x08, 0x00, 0x00, 0x00, 0x0B, 0x00, 0x00, 0x00,
-        0x0B, 0x00, 0x00, 0x00, 0x0B, 0x00, 0x00, 0x00,
-        0x0B, 0x00, 0x00, 0x00, 0x0B, 0x00, 0x00, 0x00,
-        0x09, 0x00, 0x00, 0x00, 0x09, 0x00, 0x00, 0x00,
-        0x09, 0x00, 0x00, 0x00, 0x09, 0x00, 0x00, 0x00,
-        0x09, 0x00, 0x00, 0x00, 0x09, 0x00, 0x00, 0x00,
-        0x09, 0x00, 0x00, 0x00, 0x0B, 0x00, 0x00, 0x00,
-        0x0B, 0x00, 0x00, 0x00, 0x0B, 0x00, 0x00, 0x00,
-        0x0B, 0x00, 0x00, 0x00, 0x0B, 0x00, 0x00, 0x00]
+class MRUList():
+    '''
+    Stores the most recently used values for some quantity, and
+    allows recalling recently used values by index.
+    '''
+    def __init__(self, len):
+        self.history = [0] * len
 
-MAXINT = 0xFFFFFFFF
+    def mru(self):
+        return self.history[0]
 
-class UnpackerState():
+    def add_value(self, new_val):
+        self.history[1:] = self.history[0:-1]
+        self.history[0] = new_val
+
+    def pick_recently_used(self, index):
+        (self.history[0], self.history[1:index+1]) = \
+            (self.history[index], self.history[0:index])
+        return self.history[0]
+
+class BinaryArithmeticDecoder():
+    '''
+    Decoder for data that is encoded using binary arithmetic coding.
+    This implementation uses an integer threshold in the range 1..0x7ff,
+    with 0x400 being used as (quite close to) neutral value.
+
+    A function get_raw_bit, that decodes 0 and 1 with equal probability
+    and incurs less rounding errors than get_bit with a threshold of 0x400
+    is also provided.
+    '''
+    center_threshold = 0x400
+
+    __slots__ = ['scale', 'value', 'input']
+    def __init__(self, byte_input):
+        self.scale = 0xFFFFFFFF
+        (self.value,) = struct.unpack('>I', byte_input[0:4])
+        self.input = iter(byte_input[4:] + bytearray([0,0,0,0]))
+    def _renormalize(self):
+        if self.scale < 0x01000000:
+            self.scale <<= 8
+            self.value = (self.value << 8) | next(self.input)
+    def get_bit(self, threshold):
+        self._renormalize()
+        scaled_threshold = ((self.scale >> 0x0b) * threshold)
+        if self.value < scaled_threshold:
+            self.scale = scaled_threshold
+            return 0
+        else:
+            self.value -= scaled_threshold
+            self.scale -= scaled_threshold
+            return 1
+
+    def get_raw_bit(self):
+        self._renormalize()
+        self.scale >>= 1
+        if self.value < self.scale:
+            return 0
+        else:
+            self.value -= self.scale
+            return 1
+
+class AdaptiveBitGetter():
+    '''
+    Reads bits from a BinaryArithmeticDecoder, adapting the expected
+    probability from the bits seen up to now. The adaption happens in
+    an instance variable of the AdaptiveBitGetter, so different contexts
+    with different probabilities can be obtained by using multiple
+    AdaptiveBitGetters.
+
+    An exponential sliding average is used, where the current threshold
+    is weighted 31 parts and the new symbol is weighed one part.
+    '''
+    __slots__ = ['decoder', 'threshold']
+    def __init__(self, decoder):
+        self.decoder = decoder
+        self.threshold = 0x400
+        # get_bit hardcodes 0x40 which is (2*center_threshold) >> 5.
+        assert decoder.center_threshold == 0x400
+
+    def get_bit(self):
+        bit = self.decoder.get_bit(self.threshold)
+        if bit == 0:
+            self.threshold = (self.threshold - ((self.threshold+0x1f) >> 5)) + 1*0x40
+        else:
+            self.threshold = (self.threshold - ( self.threshold       >> 5)) + 0*0x40
+        return bit
+
+class UnaryGetter():
+    '''
+    Reads a numbers from an BinaryArithmeticDecoder that are binarized
+    using unary encoding. A different context is used for each bit of
+    the number.
+
+    The result of get_value is the number of "one" bits encountered
+    before either a "zero" bit has been read or maxval bits have been
+    consumed.
+    '''
+    def __init__(self, decoder, maxval):
+        self.getters = [AdaptiveBitGetter(decoder) for _ in range(maxval)]
+
+    def get_value(self):
+        result = 0
+        for getter in self.getters:
+            if getter.get_bit() == 0:
+                return result
+            result = result + 1
+        return result
+
+class MSBFirstGetter():
+    '''
+    Reads a numbers from an BinaryArithmeticDecoder that are binarized
+    using MSB first binary representation. The context used when reading
+    a bit depends on all the earlier bits read for this number. So
+    the MSB is always obtained using the same context, while the second-most
+    significant bit is obtained using different contexts whether the MSB
+    is one or zero. The third-most significant bit is decoded using one
+    out of four contexts and so on.
+    '''
+    def __init__(self, decoder, bitcount):
+        self.layers = [[AdaptiveBitGetter(decoder) for _ in range(1<<layer)]
+                       for layer in range(bitcount)]
+
+    def get_value(self):
+        value = 0
+        for layer in self.layers:
+            value = (value << 1) + layer[value].get_bit()
+        return value
+
+class LSBFirstGetter():
+    '''
+    Reads a numbers from an BinaryArithmeticDecoder that are binarized
+    using LSB first binary representation. The context used when reading
+    a bit depends on all the earlier bits read for this number. So
+    the LSB is always obtained using the same context, while the second-least
+    significant bit is obtained using different contexts whether the LSB
+    is one or zero. The third-least significant bit is decoded using one
+    out of four contexts and so on.
+    '''
+    def __init__(self, decoder, bitcount):
+        self.layers = [[AdaptiveBitGetter(decoder) for _ in range(1<<layer)]
+                       for layer in range(bitcount)]
+
+    def get_value(self):
+        value = 0
+        bitnum = 0
+        for layer in self.layers:
+            value |= layer[value].get_bit() << bitnum
+            bitnum += 1
+        return value
+
+class LZ77Output():
+    '''
+    Generic LZ77 output handling.
+
+    This class manages an output buffer, and is able to append single bytes
+    or copy from earlier parts of the buffer, given a distance to the end.
+    A distance of 0 means the last byte already stored.
+    '''
     def __init__(self):
-        self.EAX = 0
-        self.ESI = 0 # ESI
-        self.in_pos = 0 # sp_10
-        self.sp_14 = 0
-        self.sp_18 = 0
-        self.out_pos = 0 # sp_1c
-        self.sp_20 = 0
-        self.sp_24 = 0
-        self.sp_2c = 0
-        self.sp_28 = 0
-        self.sp_30 = 0
-        # self.garbage_p = 0 # sp_3c
-        self.sp_38 = 0
-        self.sp_40 = 0
-        self.sp_44 = 0
-        self.sp_4c = 0
-        self.sp_64 = 0
-    def __str__(self):
-        attrs = ['EAX', 'ESI', 'out_pos', 'in_pos']
-        return '\n'.join(['{0}: {1}'.format(i, hex(getattr(self, i)))
-            for i in attrs])
+        self.decoded = bytearray()
 
+    # LZ77 literal code
+    def literal_byte(self, byte):
+        self.decoded.append(byte)
 
-def _pop_byte(state, byte_input):
-    if state.EAX < 0x01000000:
-        state.EAX = ((state.EAX << 8) & MAXINT)
-        state.ESI = ((state.ESI << 8) & MAXINT) | byte_input[state.in_pos]
-        state.in_pos = state.in_pos + 1
+    # LZ77 distance use/copying
+    def copy_bytes(self, distance, count):
+        for _ in range(count):
+            self.decoded.append(self.get_earlier_byte(distance))
 
+    # buffer inspection
+    def get_earlier_byte(self, distance):
+        if distance >= len(self.decoded):
+            return 0
+        else:
+            return self.decoded[-distance-1]
+
+    def get_byte_in_dword(self):
+        return len(self.decoded) & 3
+
+    def get_data(self):
+        return self.decoded
+
+    def get_length(self):
+        return len(self.decoded)
+
+class LiteralGetter():
+    '''
+    Contains the algorithm to obtain the value of a literal byte
+    for the mischief decompressor.
+
+    Obtaining a literal byte can optionally make use of a context byte.
+    If the previous LZ77 was a copy operation, the first byte not copied
+    is used as context byte (with the expectation that the byte to decode
+    is similar).
+
+    If a context byte is given, bits are decoded using different contexts
+    whether the context byte has a one or a zero at that position. As soon
+    as a mismatch between the context byte and the newly decoded byte is
+    detected (or if no context byte is given), decoding switches to a third
+    set of contexts (and behaves like the MSBFirstGetter).
+    '''
+    def __init__(self, decoder):
+        self.no_context_layers =   [[AdaptiveBitGetter(decoder) for _ in range(1<<layer)]
+                                    for layer in range(8)]
+        self.context_zero_layers = [[AdaptiveBitGetter(decoder) for _ in range(1<<layer)]
+                                    for layer in range(8)]
+        self.context_one_layers =  [[AdaptiveBitGetter(decoder) for _ in range(1<<layer)]
+                                     for layer in range(8)]
+
+    def get_value(self, context_byte):
+        use_context = context_byte != None
+        value = 0
+        for bitnr in range(8):
+            if use_context:
+                refbit = ((context_byte << bitnr) & 0x80) != 0
+                if refbit == 0:
+                    layers = self.context_zero_layers
+                else:
+                    layers = self.context_one_layers
+            else:
+                layers = self.no_context_layers
+            bit = layers[bitnr][value].get_bit()
+            value = value * 2 + bit
+            if use_context and bit != refbit:
+                use_context = False
+        return value
+
+class LengthGetter():
+    '''
+    Contains the algorithm to obtain the value of the copy length
+    for the mischief decompressor.
+
+    The length is first classified into one of three ranges (0..7,
+    8..15, 16..271). The position in each range is stored as MSB-first
+    binarized number. For the position in the two short ranges, four
+    subcontexts exist. The number of th subcontext has to be supplied
+    by the caller and is chosen depending on the current LZ77 output
+    position relative to 32-bit-boundaries in the mischief format.
+    '''
+    def __init__(self, decoder):
+        self.range_getter = UnaryGetter(decoder, 2)
+        shared_long_length_getter = MSBFirstGetter(decoder, 8)
+        # tuples of "base, getter for offset"
+        self.ranges = [[(0, MSBFirstGetter(decoder, 3)),
+                        (8, MSBFirstGetter(decoder, 3)),
+                        (16,shared_long_length_getter)] for _ in range(4)]
+
+    def get_value(self, subcontext):
+        (base, offset_getter) = self.ranges[subcontext][self.range_getter.get_value()]
+        return base + offset_getter.get_value()
+
+class DistanceGetter():
+    '''
+    Contains the algorithm to obtain the value of the copy distance
+    for the mischief decompressor.
+
+    The distance is first classified into coarse ranges: The distances
+    0 to 3 are directly encoded at this step, while bigger distances
+    of up to 2^32 are divided in 60 ranges, depending on the position
+    of the MSB (31..2) and the value of the second-most significant bit.
+    For distances above 128, some of the bits are stored "raw" without
+    an adaptive context model. The low-order bits for each range are
+    modelled using a different context.
+    '''
+    def __init__(self, decoder):
+        self.decoder = decoder
+        self.coarse_distance_getter = [MSBFirstGetter(decoder, 6) for _ in range(4)]
+        self.medium_distance_getters = \
+            [[LSBFirstGetter(decoder, n) for _ in range(2)]
+                for n in range(1, 6)]
+        self.long_distance_low_bits_getter = LSBFirstGetter(decoder, 4)
+
+    def get_value(self, length_code):
+        coarse_distance = self.coarse_distance_getter[min(length_code, 3)].get_value()
+        if coarse_distance < 4:
+            return coarse_distance
+        else:
+            next_to_MSB = coarse_distance & 1
+            extra_bits_to_fetch = 1 + ((coarse_distance - 4) >> 1)
+            result_high = (2 | next_to_MSB) << extra_bits_to_fetch
+            if extra_bits_to_fetch < 6:
+                return result_high | self.medium_distance_getters[extra_bits_to_fetch-1][next_to_MSB].get_value()
+            else:
+                for bitnum in range(extra_bits_to_fetch - 1, 3, -1):
+                    result_high |= self.decoder.get_raw_bit() << bitnum
+                return result_high | self.long_distance_low_bits_getter.get_value()
+
+class State():
+    '''
+    State of the mischief decompressor.
+
+    The state consists of a set of models for LZ77 control information,
+    namely the decision whether the next LZ77 symbol is a reference or a
+    literal, the kind of distance encoding for a reference (MRU index vs. 
+    explicitly coded) and the decision whether a reference with the most
+    recently used distance is a "quick one-byte copy" or a longer area.
+
+    Furthermore, the state is linked to a (possibly) different state the
+    decoder should switch to after decoding a literal code in this state.
+    The next state after reference codes are hard-coded in the main
+    decoder procedure.
+    '''
+    def __init__(self, decoder, state_after_literal = None):
+        self.after_literal = state_after_literal or self
+        self.is_reference_code = [AdaptiveBitGetter(decoder) for _ in range(4)]
+        self.get_reference_kind = UnaryGetter(decoder, 4)
+        self.get_kind_1_nontrivial = [AdaptiveBitGetter(decoder) for _ in range(4)]
+        
 
 def mischief_unpack(byte_input):
     '''
     this function unpacks bytes and returns an unpacked byte array
     '''
-    state = UnpackerState()
-    state.EAX = 0xFFFFFFFF
-    (unpacked_size,) = struct.unpack('I', byte_input[0:4])
-    (state.ESI,) = struct.unpack('>I', byte_input[5:9])
-    state.in_pos = 9
-    packed_length = len(byte_input)
-    byte_input += bytearray([0,0,0,0])
-    decoded_length = unpacked_size
-    state.sp_20 = 1
-    state.sp_28 = 1
-    state.sp_2c = 1
-    state.sp_40 = 1
-    state.sp_64 = decoded_length
-    state.sp_38 = decoded_length
-    sp_50 = 0
+    (out_length,) = struct.unpack('I', byte_input[0:4])
+    decoder = BinaryArithmeticDecoder(byte_input[5:])
+    output = LZ77Output()
 
-    decoded = bytearray(decoded_length)
-    garbage_length = 0x3E70
-    garbage = [0x0400] * (garbage_length // 2)
+    # literal_getters is indexed by the top 3 bits of the previous byte
+    literal_getters = [LiteralGetter(decoder) for _ in range(8)]
+    new_distance_length_getter = LengthGetter(decoder)
+    reused_distance_length_getter = LengthGetter(decoder)
+    distance_getter = DistanceGetter(decoder)
 
-    # 00467FE1
-    while state.in_pos < packed_length and state.out_pos < decoded_length:
-        _pop_byte(state, byte_input)
-        edi = state.sp_18
-        ebp = 0 # state.garbage_p
-        ebx = ((state.sp_14 & 3) + (state.sp_18 << 4))*2
-        state.sp_30 = state.sp_14 & 3
-        ecx = garbage[ebx//2]
-        edx = ((state.EAX >> 0x0b) * ecx) & MAXINT
-        # 0046801D
-        if state.ESI < edx:
-            state.EAX = edx
-            edx = ((0x800 - ecx) >> 5) + ecx
-            ebp += 0xe6c
-            garbage[ebx//2] = edx & 0xFFFF
-            # 0046804A
-            if state.sp_44 or state.sp_14:
-                ecx2 = state.out_pos or state.sp_38
-                # 3 is sp_58
-                ebp += ((decoded[ecx2 - 1] >> (8 - 3)) + ((state.sp_14 & sp_50) << 3)) * 0x600
-                state.sp_30 = ebp
-            # 0046808F
-            if state.sp_18 < 7:
-                ecx = 1
-                # 0046809F
-                while ecx < 0x100:
-                    edx = garbage[(ebp//2)+ecx]
-                    _pop_byte(state, byte_input)
-                    edi = (state.EAX >> 0xb) * edx
-                    # 004680C2
-                    if state.ESI < edi:
-                        state.EAX = edi
-                        edi = ((0x800 - edx) >> 5) + edx
-                        garbage[(ebp//2)+ecx] = edi & 0xFFFF
-                        ecx = ecx * 2
-                    # 004680D9
-                    else:
-                        state.EAX = state.EAX - edi
-                        state.ESI = state.ESI - edi
-                        edx -= edx >> 5
-                        garbage[(ebp//2)+ecx] = edx & 0xFFFF
-                        ecx = ecx * 2 + 1
-            # 004680FB
-            else:
-                edi = state.sp_38 if state.out_pos < state.sp_20 else 0
-                edi -= state.sp_20
-                ebx = 0x100
-                edi = decoded[edi + state.out_pos]
-                ecx = 1
-                tmpvar1 = edi
-                # 00468127
-                while ecx < 0x100:
-                    edi = tmpvar1 * 2
-                    tmpvar1 = edi
-                    edx = ebx & edi
-                    state.sp_4c = state.sp_30 + (edx + ebx + ecx)*2
-                    edi = garbage[state.sp_4c//2]
-                    # 0046814F
-                    _pop_byte(state, byte_input)
-                    ebp = (state.EAX >> 0xb) * edi
-                    # 00468177
-                    if state.ESI < ebp:
-                        state.EAX = ebp
-                        ebp = ((0x800 - edi) >> 5) + edi
-                        garbage[state.sp_4c//2] = ebp & 0xFFFF
-                        ecx = ecx * 2
-                        edx = ~edx
-                    # 00468192
-                    else:
-                        state.EAX -= ebp
-                        state.ESI -= ebp
-                        edi = edi - (edi >> 5)
-                        garbage[state.sp_4c//2] = edi & 0xFFFF
-                        ecx = ecx * 2 + 1
-                    ebx = ebx & edx
-            # 004681B9
-            decoded[state.out_pos] = ecx & 0xFF
-            state.out_pos += 1
-            state.sp_14 += 1
-            state.sp_18 = TABLE_50B8D8[state.sp_18]
-            continue
-        # 004681E1
-        state.EAX -= edx
-        state.ESI -= edx
-        ecx -= ecx >> 5
-        garbage[ebx//2] = ecx & 0xFFFF
-        ecx = garbage[(state.sp_18*2 + 0x180)//2]
-        # 00468200
-        _pop_byte(state, byte_input)
-        edx = ((state.EAX >> 0x0b) * ecx) & MAXINT
-        # 0046821C
-        if state.ESI < edx:
-            state.EAX = edx
-            edx = ((0x800 - ecx) >> 5) + ecx;
-            garbage[(state.sp_18*2 + 0x180)//2] = edx & 0xFFFF
-            state.sp_18 += 0x0c
-            ecx = 0x664
-        # 00468241
+    distance_history = MRUList(4)
+
+    base_state = State(decoder)
+    intermediate_after_new_distance = State(decoder, State(decoder, base_state))
+    intermediate_after_reused_distance = State(decoder, State(decoder, base_state))
+    intermediate_after_trivial_copy = State(decoder, State(decoder, base_state))
+    states_after_new_distance = [State(decoder, intermediate_after_new_distance),
+                                 State(decoder, intermediate_after_new_distance)]
+    common_after_reuse_or_trivial_after_ref = \
+        State(decoder, intermediate_after_reused_distance)
+    states_after_reused_distance = [State(decoder, intermediate_after_reused_distance),
+                                    common_after_reuse_or_trivial_after_ref]
+    states_after_trivial_copy = [State(decoder, intermediate_after_trivial_copy),
+                                 common_after_reuse_or_trivial_after_ref]
+
+    last_was_reference = False
+    copy_mismatch_byte = None
+    state = base_state
+
+    while output.get_length() < out_length:
+        if state.is_reference_code[output.get_byte_in_dword()].get_bit() == 0:
+            # LZ77 literal: add a single (new) byte to the output
+            literal_getter = literal_getters[output.get_earlier_byte(0) >> 5]
+            output.literal_byte(literal_getter.get_value(copy_mismatch_byte))
+            state = state.after_literal
+            copy_mismatch_byte = None
+            last_was_reference = False
         else:
-            state.EAX -= edx
-            state.ESI -= edx
-            ecx -= ecx >> 5
-            garbage[(state.sp_18*2 + 0x180)//2] = ecx & 0xFFFF
-            # 00468260
-            if not state.sp_44 and not state.sp_14:
-                return -1
-            edx = garbage[(state.sp_18*2 + 0x198)//2]
-            # 00468278
-            _pop_byte(state, byte_input)
-            ecx = (state.EAX >> 0xb) * edx
-            # 00468294
-            if state.ESI < ecx:
-                ebx = ((0x800 - edx) >> 5) + edx
-                edx = ((state.sp_18 + 0xf) << 4) + state.sp_30
-                garbage[(state.sp_18*2 + 0x198)//2] = ebx & 0xFFFF
-                ebx = edx*2
-                edx = garbage[ebx//2]
-                state.EAX = ecx
-                # 004682BF
-                _pop_byte(state, byte_input)
-                ecx = (state.EAX >> 0xb) * edx
-                # 004682E3
-                if state.ESI < ecx:
-                    ebp = 0 # state.sp_34
-                    state.EAX = ecx
-                    ecx = ((0x800 - edx) >> 5) + edx
-                    edx = state.sp_20
-                    garbage[ebx//2] = ecx & 0xFFFF
-                    # 00468309
-                    ebx = state.sp_38 if state.out_pos < edx else 0
-                    ebx = ebx - edx + state.out_pos
-                    state.sp_14 += 1
-                    decoded[state.out_pos] = decoded[ebx]
-                    state.out_pos += 1
-                    # 00468322
-                    state.sp_18 = 0x9 if state.sp_18 < 7 else 0xB
-                    continue
-                state.EAX -= ecx
-                state.ESI -= ecx
-                edx -= edx >> 5
-                garbage[ebx//2] = edx & 0xFFFF
-            # 00468348
+            # LZ77 reference: copy a part of previous output
+            reference_kind = state.get_reference_kind.get_value()
+            if reference_kind == 0:
+                copy_len = new_distance_length_getter.get_value(output.get_byte_in_dword()) + 2
+                distance = distance_getter.get_value(copy_len - 2)
+                distance_history.add_value(distance)
+                state = states_after_new_distance[last_was_reference]
+            elif reference_kind == 1 and \
+                 not state.get_kind_1_nontrivial[output.get_byte_in_dword()].get_bit():
+                copy_len = 1
+                distance = distance_history.mru()
+                state = states_after_trivial_copy[last_was_reference]
             else:
-                state.EAX -= ecx
-                state.ESI -= ecx
-                edx -= (edx >> 5)
-                garbage[(state.sp_18*2+0x198)//2] = edx & 0xFFFF
-                ecx = garbage[(state.sp_18*2+0x1B0)//2]
-                # 0046836D
-                _pop_byte(state, byte_input)
-                edx = (state.EAX >> 0xb) * ecx
-                # 00468389
-                if state.ESI < edx:
-                    state.EAX = edx
-                    edx = ((0x800 - ecx) >> 5) + ecx
-                    ecx = state.sp_28
-                    garbage[(state.sp_18*2+0x1B0)//2] = edx & 0xFFFF
-                # 004683A5
-                else:
-                    state.EAX -= edx
-                    state.ESI -= edx
-                    ecx = ecx - (ecx >> 5)
-                    garbage[(state.sp_18*2+0x1B0)//2] = ecx & 0xFFFF
-                    ecx = garbage[(state.sp_18*2+0x1C8)//2]
-                    # 004683CA
-                    _pop_byte(state, byte_input)
-                    edx = (state.EAX >> 0xb) * ecx
-                    # 004683E1
-                    if state.ESI < edx:
-                        state.EAX = edx
-                        edx = ((0x800 - ecx) >> 5) + ecx
-                        ecx = state.sp_2c
-                        garbage[(state.sp_18*2+0x1C8)//2] = edx & 0xFFFF
-                    # 00468402
-                    else:
-                        state.EAX -= edx
-                        state.ESI -= edx
-                        ecx -= ecx >> 5
-                        garbage[(state.sp_18*2+0x1C8)//2] = ecx & 0xFFFF
-                        ecx = state.sp_40
-                        state.sp_40 = state.sp_2c
-                    state.sp_2c = state.sp_28
-                state.sp_28 = state.sp_20
-                state.sp_20 = ecx
-            # 00468437
-            state.sp_18 = 8 if state.sp_18 < 7 else 0xb
-            ecx = 0xA68
-        edx = garbage[ecx//2]
-        # 0046844f
-        _pop_byte(state, byte_input)
-        edi = (state.EAX >> 0xb) * edx
-        # 0046846B
-        if state.ESI < edi:
-            ebx = state.sp_30 * 2
-            state.EAX = edi
-            edi = ((0x800 - edx) >> 5) + edx
-            garbage[ecx//2] = edi & 0xFFFF
-            ebx = ecx + state.sp_30 * 2 * 8 + 4
-            ebp = 0
-            state.sp_30 = 8
-        # 00468497
-        else:
-            state.EAX -= edi
-            state.ESI -= edi
-            edx -= edx >> 5
-            garbage[ecx//2] = edx & 0xFFFF
-            edx = garbage[(ecx + 2)//2]
-            # 004684B3
-            _pop_byte(state, byte_input)
-            edi = (state.EAX >> 0xb) * edx
-            # 004684CF
-            if state.ESI < edi:
-                ebx = state.sp_30
-                state.EAX = edi
-                edi = ((0x800 - edx) >> 5) + edx
-                garbage[(ecx+2)//2] = edi & 0xFFFF
-                ebx = ecx + ebx * 2 * 8 + 0x104
-                ebp = 8
-                state.sp_30 = 8
-            # 004684F9
-            else:
-                state.EAX -= edi
-                state.ESI -= edi
-                edx = edx - (edx >> 5)
-                garbage[(ecx+2)//2] = edx & 0xFFFF
-                ebx = ecx+0x204
-                ebp = 0x10
-                state.sp_30 = 0x100
-        # 0046851D
-        edi = 1
-        while edi < state.sp_30:
-            ecx = garbage[(ebx+edi*2)//2]
-            # 00468522
-            _pop_byte(state, byte_input)
-            edx = (state.EAX >> 0xb) * ecx
-            # 0046854A
-            if state.ESI < edx:
-                state.EAX = edx
-                edx = ((0x800 - ecx) >> 5) + ecx
-                garbage[(ebx+edi*2)//2] = edx & 0xFFFF
-                edi += edi
-            # 00468560
-            else:
-                state.EAX -= edx
-                state.ESI -= edx
-                ecx = ecx - (ecx >> 5)
-                garbage[(ebx+edi*2)//2] = ecx & 0xFFFF
-                edi += edi + 1
-        # 0046857D
-        ebp -= state.sp_30
-        edi += ebp
-        state.sp_24 = edi
-        # 0046858A
-        if state.sp_18 >= 0x0c:
-            ecx = edi
-            # 00468595
-            if edi >= 4:
-                ecx = 3
-            ebp = state.in_pos
-            ecx = ((ecx << 7) + 0x360) & MAXINT
-            # 004685AE-00468794 (unwound loop)
-            tmpvar2 = 1
-            while tmpvar2 < 0x40:
-                tmpvar2 = tmpvar2 * 2
-                edx = garbage[(ecx + tmpvar2)//2]
-                _pop_byte(state, byte_input)
-                edi = (state.EAX >> 0xb) * edx
-                if state.ESI < edi:
-                    state.EAX = edi
-                    edi = ((0x800 - edx) >> 5) + edx
-                    garbage[(tmpvar2+ecx)//2] = edi & 0xFFFF
-                else:
-                    state.EAX -= edi
-                    state.ESI -= edi
-                    edx -= edx >> 5
-                    garbage[(tmpvar2+ecx)//2] = edx & 0xFFFF
-                    tmpvar2 += 1
+                copy_len = reused_distance_length_getter.get_value(output.get_byte_in_dword()) + 2
+                distance = distance_history.pick_recently_used(reference_kind - 1)
+                state = states_after_reused_distance[last_was_reference]
+            if output.get_length() + copy_len > out_length:
+                raise Exception("Unpacking generates excess data")
+            output.copy_bytes(distance, copy_len)
+            copy_mismatch_byte = output.get_earlier_byte(distance) # first non-copied byte
+            last_was_reference = True
 
-            ebp = tmpvar2 - 0x40
-            # 00468794
-            if ebp >= 4:
-                edx = ebp
-                # edi = 1
-                ecx = (ebp >> 1) - 1
-                ebp = (ebp & 1) | 2
-                state.sp_30 = ecx
-                # 004687B3
-                if edx < 0x0e:
-                    ebp = ebp << (ecx & 0xFF)
-                    edi = 1
-                    state.sp_40 = 1
-                    ecx = ebp - edx
-                    ebx = ecx*2+0x55e
-                    # 004687CE
-                    while state.sp_30:
-                        edx = garbage[(ebx+edi*2)//2]
-                        # 004687D9
-                        _pop_byte(state, byte_input)
-                        ecx = (state.EAX >> 0xb) * edx
-                        # 004687F8
-                        if state.ESI < ecx:
-                            state.EAX = ecx
-                            ecx = ((0x800 - edx) >> 5) + edx
-                            garbage[(ebx+edi*2)//2] = ecx & 0xFFFF
-                            edi += edi
-                        # 0046880E
-                        else:
-                            state.EAX -= ecx
-                            state.ESI -= ecx
-                            edx -= edx >> 5
-                            ebp = ebp | state.sp_40
-                            garbage[(ebx+edi*2)//2] = edx & 0xFFFF
-                            edi += edi + 1
-                        state.sp_40 = state.sp_40 << 1
-                        state.sp_30 -= 1
-                # 00468831
-                else:
-                    ecx -= 4
-                    state.sp_30 = ecx
-                    # 00468846
-                    while state.sp_30:
-                        _pop_byte(state, byte_input)
-                        # 00468854
-                        state.EAX = state.EAX >> 1
-                        state.ESI = (state.ESI - state.EAX) & MAXINT
-                        edx = -(state.ESI >> 0x1F)
-                        ebp = edx + ebp*2 + 1
-                        state.ESI = (state.ESI + (edx & state.EAX)) & MAXINT
-                        state.sp_30 -= 1
-                    # 0046886D-004689F6 (unwound loop)
-                    ebp = ebp << 4
-                    tmpvar3 = 1
-                    for tmpvar4 in range(4):
-                        tmpvar3 = tmpvar3 * 2
-                        edx = garbage[(0x644 + tmpvar3)//2]
-                        _pop_byte(state, byte_input)
-                        edi = (state.EAX >> 0xb) * edx
-                        if state.ESI < edi:
-                            state.EAX = edi
-                            edi = ((0x800 - edx) >> 5) + edx
-                            garbage[(0x644 + tmpvar3)//2] = edi & 0xFFFF
-                        else:
-                            state.EAX -= edi
-                            state.ESI -= edi
-                            edx -= edx >> 5
-                            garbage[(0x644 + tmpvar3)//2] = edx & 0xFFFF
-                            ebp = ebp | (1 << tmpvar4)
-                            tmpvar3 += 1
-                    # 004689F6
-                    if ebp == -1:
-                        state.sp_24 += 0x112
-                        state.sp_18 -= 0x0c
-                        break
-            # 004689FC
-            state.sp_40 = state.sp_2c
-            (state.sp_28, state.sp_2c) = (state.sp_20, state.sp_28)
-            ecx = state.sp_20
-            state.sp_20 = ebp + 1
-            # 00468A2B
-            if (state.sp_20 and 0 >= state.sp_20) \
-                    or 0 >= state.sp_14: # state.garbage_p
-                return -3
-            # 00468A31
-            state.sp_18 = 0x7 if state.sp_18 < 0x13 else 0xa
-            edi = state.sp_24
-
-        # 00468A46
-        ecx = state.sp_64
-        ebp = state.out_pos
-        edi += 2
-        # 00468A51
-        if state.sp_64 == state.out_pos:
-            return -4
-        ecx -= state.out_pos
-        # 00468A5B
-        state.sp_30 = min(ecx, edi)
-        # 00468A67
-        ebx = state.sp_20
-        edx = state.sp_38
-        # 00468A6F
-        ecx = (edx if ebp < ebx else 0) - ebx
-        ebx = state.sp_30
-        state.sp_14 += state.sp_30
-        edi -= state.sp_30
-        ecx += ebp
-        state.sp_24 = edi
-        edi = ecx + ebx
-        # 00468A8C
-        if edi <= edx:
-            edx = 0 # state.sp_34
-            ecx -= ebp
-            edx += ebp
-            ebp += ebx
-            edi = ecx
-            ecx = edx + ebx
-            state.out_pos = ebp
-            while edx < ecx:
-                ebx = decoded[edi+edx]
-                decoded[edx] = ebx
-                edx += 1
-        # 00468AAB
-        else:
-            edi = 0 # state.sp_34
-            # 00468AAD
-            while ebx > 0:
-                edx = decoded[ecx+edi]
-                decoded[ebp+edi] = edx
-                ecx += 1
-                ebp += 1
-                # 00468ABD
-                if ecx == state.sp_38:
-                    ecx = 0
-                ebx -= 1
-            # 00468AC4
-            state.out_pos = ebp
-    return decoded
+    return output.get_data()
 
 
 ART_MAGICS = set([b'\xc5\xb3\x8b\xe9', b'\xc5\xb3\x8b\xe7'])
