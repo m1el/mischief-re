@@ -1,7 +1,5 @@
-extern crate byteorder;
-
 use ::std::cmp::{min};
-use self::byteorder::{ByteOrder, LittleEndian, BigEndian};
+use ::byteorder::{ByteOrder, LittleEndian, BigEndian};
 
 #[derive(Debug)]
 pub enum DecodeError {
