@@ -26,22 +26,12 @@ where
     move |i: I| {
         let mut input = i.clone();
 
-        let count = match c(input.clone()) {
-            Ok((i, o)) => {
-                input = i;
-                o.to_usize()
-            }
-            Err(nom::Err::Error(e)) => {
-                return Err(nom::Err::Error(E::append(i, ErrorKind::Count, e)));
-            }
-            Err(e) => {
-                return Err(e);
-            }
-        };
+        let (i, count) = c(input.clone())?;
+        input = i.clone();
 
         let mut res = Vec::new();
 
-        for _ in 0..count {
+        for _ in 0..count.to_usize() {
             let input_ = input.clone();
             match f(input_) {
                 Ok((i, o)) => {
