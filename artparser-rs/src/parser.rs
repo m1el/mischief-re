@@ -24,10 +24,7 @@ where
     E: ParseError<I>,
 {
     move |i: I| {
-        let mut input = i.clone();
-
-        let (i, count) = c(input.clone())?;
-        input = i.clone();
+        let (mut input, count) = c(i.clone())?;
 
         let mut res = Vec::new();
 
