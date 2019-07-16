@@ -5,3 +5,4 @@ authors = ["Igor null <m1el.2027@gmail.com>"]
 
 [dependencies]
 byteorder = "1"
+nom = "5"
