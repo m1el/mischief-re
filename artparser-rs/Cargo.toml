@@ -2,6 +2,8 @@
 name = "artparser"
 version = "0.1.0"
 authors = ["Igor null <m1el.2027@gmail.com>"]
+license = "MIT"
 
 [dependencies]
 byteorder = "1"
+nom = "5"
