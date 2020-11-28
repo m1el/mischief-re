@@ -459,6 +459,13 @@ def read_image(data, pos):
     (val['raw'], pos) = read_bytes(data, pos, size)
     return (val, pos)
 
+def read_polyline(data, pos, count):
+    val = {}
+    points = []
+    for _ in range(count):
+        ([x, y, p], pos) = read_float_array(data, pos, 3)
+        points.append({ 'x': x, 'y': y, 'p': p })
+    return (points, pos)
 
 def read_action(data, pos):
     val = {}
@@ -493,6 +500,38 @@ def read_action(data, pos):
 
         val['points'] = points
 
+    elif val['action_id'] == 0x02:
+        val['action_name'] = 'polyline'
+        (val['points'], pos) = read_polyline(data, pos, 2)
+
+    elif val['action_id'] == 0x03:
+        val['action_name'] = 'polyline'
+        (count, pos) = read_int(data, pos)
+        (val['points'], pos) = read_polyline(data, pos, count)
+
+    elif val['action_id'] == 0x04:
+        val['action_name'] = 'polyline'
+        (count, pos) = read_int(data, pos)
+        (val['points'], pos) = read_polyline(data, pos, count)
+
+    elif val['action_id'] == 0x05:
+        val['action_name'] = 'rect'
+        ([x, y, w, h, angle], pos) = read_float_array(data, pos, 5)
+        val['x'] = x
+        val['y'] = y
+        val['w'] = w
+        val['h'] = h
+        val['angle'] = angle
+
+    elif val['action_id'] == 0x06:
+        val['action_name'] = 'ellipse'
+        ([cx, cy, rx, ry, angle], pos) = read_float_array(data, pos, 5)
+        val['cx'] = cx + rx / 4.0
+        val['cy'] = cy + ry / 4.0
+        val['rx'] = rx / 2.0
+        val['ry'] = ry / 2.0
+        val['angle'] = angle
+
     elif val['action_id'] == 0x08:
         val['action_name'] = 'unknown_08'
         (val['argument'], pos) = read_int(data, pos)
@@ -517,7 +556,8 @@ def read_action(data, pos):
 
     elif val['action_id'] == 0x36:
         val['action_name'] = 'is_eraser'
-        (val['is_eraser'], pos) = read_int(data, pos)
+        (is_eraser, pos) = read_int(data, pos)
+        val['is_eraser'] = is_eraser != 0
 
     elif val['action_id'] == 0x0f:
         val['action_name'] = 'paste_layer'
@@ -552,10 +592,6 @@ def read_action(data, pos):
         (val['unknown'], pos) = read_int(data, pos)
         (val['src_size'], pos) = read_int_array(data, pos, 2)
         (val['image_id'], pos) = read_int(data, pos)
-
-    elif val['action_id'] == 0x05:
-        val['action_name'] = 'unknown_05'
-        (val['data'], pos) = data[pos:pos+0x14], pos + 0x14
 
     else:
         import binascii
